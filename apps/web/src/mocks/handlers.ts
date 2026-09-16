@@ -39,7 +39,23 @@ const nowIso = () => new Date().toISOString();
 export interface MockResponse {
   status: number;
   body: unknown;
+  /** Set on the response, e.g. the mock session cookie. */
+  cookies?: { name: string; value: string; maxAge?: number }[];
 }
+
+/**
+ * The name of the cookie the mock uses to remember who is signed in.
+ *
+ * It is a cookie rather than a variable in this module for two reasons: module
+ * state is dropped whenever the dev server recompiles, which made the signed-in
+ * role randomly revert mid-session; and a cookie is per browser context, so two
+ * windows can be two different roles at once — which is exactly what testing
+ * the panels requires.
+ *
+ * The real session is a signed, httpOnly cookie issued by the API. This is a
+ * stand-in for it, and carries no authority whatsoever.
+ */
+export const MOCK_ROLE_COOKIE = 'emr_mock_role';
 
 function ok(body: unknown): MockResponse {
   return { status: 200, body };
@@ -119,14 +135,16 @@ export async function handleMock(
   path: string,
   search: URLSearchParams,
   body: unknown,
+  signedInRole?: string,
 ): Promise<MockResponse> {
   const segments = path.split('/').filter(Boolean);
   const route = `${method} /${segments.join('/')}`;
+  const currentRole = (signedInRole ?? 'RECEPTIONIST') as Session['role'];
 
   /* --- Session -------------------------------------------------------- */
 
   if (route === 'GET /auth/me') {
-    const role = (search.get('as') ?? store.currentRole) as Session['role'];
+    const role = (search.get('as') ?? currentRole) as Session['role'];
     const user =
       store.staff.find((s) => s.role === role) ?? store.staff[0]!;
     const session: Session = {
@@ -152,8 +170,11 @@ export async function handleMock(
       // wrong — the login endpoint must not confirm which accounts exist.
       return problem(401, 'Sign in failed', 'That email and password do not match.');
     }
-    store.currentRole = user.role;
-    return ok({ mfaRequired: user.mfaEnabled });
+    return {
+      status: 200,
+      body: { mfaRequired: user.mfaEnabled },
+      cookies: [{ name: MOCK_ROLE_COOKIE, value: user.role, maxAge: 60 * 60 * 8 }],
+    };
   }
 
   if (route === 'POST /auth/mfa/verify') {
@@ -165,7 +186,11 @@ export async function handleMock(
   }
 
   if (route === 'POST /auth/logout') {
-    return { status: 204, body: null };
+    return {
+      status: 204,
+      body: null,
+      cookies: [{ name: MOCK_ROLE_COOKIE, value: '', maxAge: 0 }],
+    };
   }
 
   if (route === 'GET /nav/counts') {
@@ -608,7 +633,7 @@ export async function handleMock(
       return problem(409, 'Already finalised', 'This consultation has already been signed.');
     }
 
-    const signer = store.staff.find((s) => s.role === store.currentRole);
+    const signer = store.staff.find((s) => s.role === currentRole);
     if (!signer || signer.role !== 'DOCTOR') {
       return problem(
         403,

@@ -36,3 +36,8 @@ pnpm-debug.log*
 # local scratch
 .turbo/
 tmp/
+
+# playwright
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/blob-report/

@@ -15,7 +15,7 @@
  */
 
 import { NextResponse, type NextRequest } from 'next/server';
-import { handleMock } from '@/mocks/handlers';
+import { MOCK_ROLE_COOKIE, handleMock } from '@/mocks/handlers';
 
 const API_BASE_URL = process.env.API_BASE_URL;
 
@@ -47,9 +47,22 @@ async function forward(request: NextRequest, path: string[]): Promise<Response> 
       `/${suffix}`,
       url.searchParams,
       parsed,
+      request.cookies.get(MOCK_ROLE_COOKIE)?.value,
     );
-    if (result.status === 204) return new NextResponse(null, { status: 204 });
-    return NextResponse.json(result.body, { status: result.status });
+
+    const response =
+      result.status === 204
+        ? new NextResponse(null, { status: 204 })
+        : NextResponse.json(result.body, { status: result.status });
+
+    for (const cookie of result.cookies ?? []) {
+      response.cookies.set(cookie.name, cookie.value, {
+        path: '/',
+        sameSite: 'lax',
+        maxAge: cookie.maxAge,
+      });
+    }
+    return response;
   }
 
   const headers = new Headers();

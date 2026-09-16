@@ -23,10 +23,20 @@ export function usePatients(search: string) {
   });
 }
 
+/**
+ * `enabled` is not optional here.
+ *
+ * Several screens derive the patient id from a record that is still loading —
+ * the consultation screen reads it from the encounter. Without this guard the
+ * hook fires `/patients/` with an empty id, which is a wasted request at best
+ * and, depending on how the server treats the trailing slash, a fetch of the
+ * entire patient registry at worst.
+ */
 export function usePatient(id: string) {
   return useQuery({
     queryKey: qk.patient(id),
     queryFn: () => api.get<Patient>(`/patients/${id}`),
+    enabled: Boolean(id),
   });
 }
 
@@ -42,6 +52,7 @@ export function usePatientSnapshot(id: string) {
     queryKey: qk.snapshot(id),
     queryFn: () => api.get<PatientSnapshot>(`/patients/${id}/snapshot`),
     staleTime: 10_000,
+    enabled: Boolean(id),
   });
 }
 
@@ -49,6 +60,7 @@ export function usePatientVisits(id: string) {
   return useQuery({
     queryKey: qk.patientVisits(id),
     queryFn: () => api.get<Encounter[]>(`/patients/${id}/visits`),
+    enabled: Boolean(id),
   });
 }
 
@@ -103,6 +115,7 @@ export function useAllergies(patientId: string) {
   return useQuery({
     queryKey: ['patients', patientId, 'allergies'],
     queryFn: () => api.get<Allergy[]>(`/patients/${patientId}/allergies`),
+    enabled: Boolean(patientId),
   });
 }
 

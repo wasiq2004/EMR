@@ -25,7 +25,6 @@ import type {
   Message,
   Observation,
   Patient,
-  StaffUser,
   Task,
 } from '@emr/contracts';
 import { ALLERGIES, CLINIC, CONDITIONS, OBSERVATIONS, PATIENTS, STAFF } from './seed';
@@ -46,38 +45,60 @@ function uuid(): string {
   return globalThis.crypto.randomUUID();
 }
 
-/** Mutable state. Reset whenever the dev server restarts. */
-export const store = {
-  clinic: { ...CLINIC },
-  staff: [...STAFF],
-  patients: [...PATIENTS] as Patient[],
-  allergies: [...ALLERGIES] as Allergy[],
-  conditions: [...CONDITIONS],
-  observations: [...OBSERVATIONS] as Observation[],
-  encounters: [] as Encounter[],
-  prescriptions: [] as MedicationRequest[],
-  appointments: [] as Appointment[],
-  conversations: [] as Conversation[],
-  messages: [] as Message[],
-  invoices: [] as Invoice[],
-  tasks: [] as Task[],
-  internalNotes: [] as InternalNote[],
-  auditEvents: [...AUDIT_EVENTS] as AuditEvent[],
-  documents: [] as ClinicalDocument[],
-  consents: [] as Consent[],
-  services: [...SERVICES],
-  whatsappAccount: { ...WHATSAPP_ACCOUNT },
-  messageTemplates: [...MESSAGE_TEMPLATES],
-  /** Proof that a duplicate search ran, keyed by token. */
-  searchTokens: new Set<string>(),
-  mrnCounter: 500,
-  /**
-   * Which role the mock is signed in as. Real sessions come from a verified
-   * JWT; this exists only so the panels can be demonstrated without a backend.
-   * Switch it from the role picker on the sign-in screen.
-   */
-  currentRole: 'RECEPTIONIST' as StaffUser['role'],
-};
+/**
+ * Mutable state, pinned to the global object.
+ *
+ * The dev server re-evaluates this module whenever it compiles a route for the
+ * first time, which silently threw away everything anyone had entered — a
+ * patient registered during a demo would vanish the moment a colleague opened
+ * a screen nobody had visited yet. Hanging it off `globalThis` survives module
+ * re-evaluation, so the mock behaves like a backend that stays up.
+ *
+ * It still resets when the dev server itself restarts, which is correct: this
+ * is sample data, not storage.
+ */
+const GLOBAL_KEY = Symbol.for('emr.mock.store');
+
+interface GlobalWithStore {
+  [GLOBAL_KEY]?: MockStore;
+}
+
+function buildStore() {
+  return {
+    clinic: { ...CLINIC },
+    staff: [...STAFF],
+    patients: [...PATIENTS] as Patient[],
+    allergies: [...ALLERGIES] as Allergy[],
+    conditions: [...CONDITIONS],
+    observations: [...OBSERVATIONS] as Observation[],
+    encounters: [] as Encounter[],
+    prescriptions: [] as MedicationRequest[],
+    appointments: [] as Appointment[],
+    conversations: [] as Conversation[],
+    messages: [] as Message[],
+    invoices: [] as Invoice[],
+    tasks: [] as Task[],
+    internalNotes: [] as InternalNote[],
+    auditEvents: [...AUDIT_EVENTS] as AuditEvent[],
+    documents: [] as ClinicalDocument[],
+    consents: [] as Consent[],
+    services: [...SERVICES],
+    whatsappAccount: { ...WHATSAPP_ACCOUNT },
+    messageTemplates: [...MESSAGE_TEMPLATES],
+    /** Proof that a duplicate search ran, keyed by token. */
+    searchTokens: new Set<string>(),
+    mrnCounter: 500,
+  };
+}
+
+type MockStore = ReturnType<typeof buildStore>;
+
+const globalStore = globalThis as unknown as GlobalWithStore;
+/** True only the first time this module is evaluated in a server process. */
+const isFresh = globalStore[GLOBAL_KEY] === undefined;
+globalStore[GLOBAL_KEY] ??= buildStore();
+
+export const store: MockStore = globalStore[GLOBAL_KEY];
 
 const DOCTOR = STAFF[0]!;
 const NURSE = STAFF[3]!;
@@ -113,7 +134,7 @@ function appointment(partial: Partial<Appointment> & { patientId: string }): App
   };
 }
 
-store.appointments = [
+if (isFresh) store.appointments = [
   appointment({
     patientId: P(3).id, // Lakshmi Narayanan — the Flow 3/4 fixture
     status: 'ARRIVED',
@@ -201,7 +222,7 @@ function encounter(
   };
 }
 
-store.encounters = [
+if (isFresh) store.encounters = [
   encounter({
     patientId: P(3).id,
     startedAt: iso(-days(62)),
@@ -268,7 +289,7 @@ function medication(
 }
 
 const lakshmiEncounter = store.encounters[0]!.id;
-store.prescriptions = [
+if (isFresh) store.prescriptions = [
   medication(P(3).id, lakshmiEncounter, 'Glycomet 500', 'Metformin', '500 mg', '1-0-1'),
   medication(P(3).id, lakshmiEncounter, 'Telma 40', 'Telmisartan', '40 mg', '1-0-0'),
   medication(P(3).id, lakshmiEncounter, 'Atorva 10', 'Atorvastatin', '10 mg', '0-0-1'),
@@ -281,7 +302,7 @@ store.prescriptions = [
 const conversationId = uuid();
 const unlinkedConversationId = uuid();
 
-store.conversations = [
+if (isFresh) store.conversations = [
   {
     id: conversationId,
     patientId: P(3).id,
@@ -341,7 +362,7 @@ store.conversations = [
   },
 ];
 
-store.messages = [
+if (isFresh) store.messages = [
   {
     id: uuid(),
     conversationId,
@@ -411,7 +432,7 @@ store.messages = [
  * Tasks — where the safety mechanisms terminate
  * ------------------------------------------------------------------------- */
 
-store.tasks = [
+if (isFresh) store.tasks = [
   {
     id: uuid(),
     status: 'REQUESTED',
@@ -480,7 +501,7 @@ store.tasks = [
  * Billing
  * ------------------------------------------------------------------------- */
 
-store.invoices = [
+if (isFresh) store.invoices = [
   {
     id: uuid(),
     patientId: P(0).id,
@@ -572,5 +593,5 @@ export function nextMrn(): string {
 export { uuid };
 
 /* Documents and consents for the Snapshot fixture patient. */
-store.documents = seedDocuments(P(3).id, P(3).fullName, DOCTOR.fullName);
-store.consents = seedConsents(P(3).id);
+if (isFresh) store.documents = seedDocuments(P(3).id, P(3).fullName, DOCTOR.fullName);
+if (isFresh) store.consents = seedConsents(P(3).id);

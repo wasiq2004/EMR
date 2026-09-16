@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Slot } from '@radix-ui/react-slot';
+import { Slot, Slottable } from '@radix-ui/react-slot';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/cn';
@@ -54,9 +54,40 @@ export interface ButtonProps
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild, loading, children, disabled, ...props }, ref) => {
-    const Comp = asChild ? Slot : 'button';
+    /*
+     * `Slottable` is load-bearing, not decoration.
+     *
+     * Slot merges this component's props onto a single child element and
+     * requires exactly one. A spinner rendered as a sibling of `children`
+     * gives it two, and it throws even when the spinner is null, because the
+     * array still has two entries. Marking `children` as the slottable one
+     * tells Slot which element to merge into and renders the spinner inside
+     * it, so `<Button asChild><Link/></Button>` works and keeps its loading
+     * state.
+     *
+     * These two children must be written inline. Wrapping them in a fragment
+     * hands Slot the fragment as its single child, and it then tries to put
+     * `className` on a `React.Fragment`.
+     */
+    if (asChild) {
+      return (
+        <Slot
+          ref={ref}
+          className={cn(button({ variant, size }), className)}
+          // `disabled` is not a valid attribute on an anchor, which is what
+          // asChild almost always wraps. State it accessibly instead.
+          aria-disabled={disabled || loading || undefined}
+          aria-busy={loading || undefined}
+          {...props}
+        >
+          {loading ? <Loader2 className="animate-spin" aria-hidden /> : null}
+          <Slottable>{children}</Slottable>
+        </Slot>
+      );
+    }
+
     return (
-      <Comp
+      <button
         ref={ref}
         className={cn(button({ variant, size }), className)}
         disabled={disabled || loading}
@@ -65,7 +96,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       >
         {loading ? <Loader2 className="animate-spin" aria-hidden /> : null}
         {children}
-      </Comp>
+      </button>
     );
   },
 );

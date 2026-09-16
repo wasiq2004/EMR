@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useIsRestoring, useQuery } from '@tanstack/react-query';
 import { can, type Permission, type Session } from '@emr/contracts';
 import { api } from './api-client';
 import { qk } from './query-client';
@@ -32,13 +32,30 @@ export function SessionProvider({
   children: React.ReactNode;
   initialSession?: Session | null;
 }) {
-  const { data, isLoading } = useQuery({
+  /*
+   * `isRestoring` is not optional here, and neither is `status`.
+   *
+   * The query cache is restored from the device asynchronously. While that is
+   * happening TanStack Query holds queries idle, so `isLoading` — which is
+   * `isPending && isFetching` — reports FALSE even though nothing has been
+   * fetched yet. A guard written against `isLoading` therefore sees "not
+   * loading, no session" on first paint and bounces a signed-in user to the
+   * sign-in screen.
+   *
+   * That is what used to happen on every fresh load of a deep link. Wait for
+   * restoration to finish, and treat `pending` as still loading.
+   */
+  const isRestoring = useIsRestoring();
+
+  const { data, status, fetchStatus } = useQuery({
     queryKey: qk.session,
     queryFn: () => api.get<Session>('/auth/me'),
     initialData: initialSession ?? undefined,
     staleTime: 60_000,
     retry: false,
   });
+
+  const isLoading = isRestoring || status === 'pending' || fetchStatus === 'fetching';
 
   const value = React.useMemo(
     () => ({ session: data ?? null, isLoading }),
