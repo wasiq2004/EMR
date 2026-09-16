@@ -1,0 +1,278 @@
+@import 'tailwindcss';
+
+/*
+ * DESIGN TOKENS — Clinic EMR
+ *
+ * Two decisions here are clinical rather than aesthetic, and both are
+ * deliberate:
+ *
+ * 1. TYPEFACE. Atkinson Hyperlegible is the UI face because its letterforms
+ *    are drawn to be *unambiguous*, not merely attractive — 1/l/I and 0/O are
+ *    visually distinct. This product asks staff to read drug names, strengths
+ *    and dosage patterns like "1-0-1" at speed, where a misread is a clinical
+ *    error rather than a typo. It is also the strongest answer we have to the
+ *    pilot participant profile of a doctor aged 50+ with low computer
+ *    confidence. Numerals and identifiers use a monospace face so columns of
+ *    figures align and an MRN never reflows.
+ *
+ * 2. CLINICAL STATE IS NOT THE ACCENT. Allergy, abnormal vital and overdue are
+ *    semantic colours held separate from the brand accent, so a redesign of the
+ *    accent can never quietly change what "critical" looks like. Every one of
+ *    them is also paired with an icon or a label, because colour alone is not
+ *    an accessible signal.
+ *
+ * Contrast target: WCAG 2.2 AA on core flows (4.5:1 body, 3:1 large and UI).
+ */
+
+@theme {
+  /* ---- Typography ---------------------------------------------------- */
+  --font-sans:
+    var(--font-atkinson), 'Atkinson Hyperlegible', ui-sans-serif, system-ui,
+    -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono:
+    var(--font-plex-mono), 'IBM Plex Mono', ui-monospace, 'SF Mono',
+    'Cascadia Mono', Menlo, monospace;
+
+  /* Dense by design: a clinic desktop is 1366×768 and shows a lot at once. */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.125rem;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 0.875rem;
+  --text-base--line-height: 1.375rem;
+  --text-md: 0.9375rem;
+  --text-md--line-height: 1.5rem;
+  --text-lg: 1.0625rem;
+  --text-lg--line-height: 1.5rem;
+  --text-xl: 1.25rem;
+  --text-xl--line-height: 1.625rem;
+  --text-2xl: 1.5rem;
+  --text-2xl--line-height: 1.875rem;
+  --text-3xl: 1.875rem;
+  --text-3xl--line-height: 2.25rem;
+
+  /* ---- Neutral surfaces ---------------------------------------------- */
+  /* Cool-biased greys, tuned toward the accent so nothing reads as default. */
+  --color-canvas: #f4f6f7;
+  --color-surface: #ffffff;
+  --color-surface-sunk: #eceff1;
+  --color-surface-raised: #ffffff;
+  --color-overlay: #0d181c;
+
+  --color-ink: #10202a;
+  --color-ink-soft: #445862;
+  --color-ink-faint: #6d838d;
+  --color-ink-inverse: #f7fafb;
+
+  --color-line: #d5dde1;
+  --color-line-soft: #e6ecee;
+  --color-line-strong: #b4c2c9;
+
+  /* ---- Accent -------------------------------------------------------- */
+  --color-accent: #0e6e63;
+  --color-accent-hover: #0b574e;
+  --color-accent-soft: #daeeea;
+  --color-accent-ink: #0a4a43;
+  --color-accent-contrast: #ffffff;
+
+  /* ---- Clinical state ------------------------------------------------ */
+  /* Never reused for branding. Always paired with an icon or a word. */
+  --color-critical: #b3251b;
+  --color-critical-soft: #fbe6e4;
+  --color-critical-line: #f0b7b2;
+  --color-critical-contrast: #ffffff;
+
+  --color-warning: #8a5300;
+  --color-warning-soft: #fdf0d9;
+  --color-warning-line: #eed19a;
+
+  --color-positive: #196c3c;
+  --color-positive-soft: #e0f3e7;
+  --color-positive-line: #a9d9bc;
+
+  --color-info: #1d5c99;
+  --color-info-soft: #e3eefa;
+  --color-info-line: #aecbe9;
+
+  /* Chronic conditions read as persistent, not alarming. */
+  --color-chronic: #5b4396;
+  --color-chronic-soft: #ece7f8;
+
+  /* ---- Radius and elevation ------------------------------------------ */
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  --shadow-raise: 0 1px 2px rgb(16 32 42 / 0.06), 0 1px 3px rgb(16 32 42 / 0.04);
+  --shadow-pop: 0 4px 12px rgb(16 32 42 / 0.1), 0 2px 4px rgb(16 32 42 / 0.06);
+  --shadow-modal: 0 16px 48px rgb(16 32 42 / 0.22);
+}
+
+/* Dark theme. Clinics run late; a night shift should not be a white flash. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --color-canvas: #0d1518;
+    --color-surface: #141f23;
+    --color-surface-sunk: #101a1d;
+    --color-surface-raised: #1a262b;
+
+    --color-ink: #e6eef0;
+    --color-ink-soft: #a5b8bf;
+    --color-ink-faint: #7a8f97;
+    --color-ink-inverse: #0d1518;
+
+    --color-line: #27363b;
+    --color-line-soft: #1e2b30;
+    --color-line-strong: #3a4c53;
+
+    --color-accent: #4fb3a4;
+    --color-accent-hover: #6ac4b6;
+    --color-accent-soft: #10312e;
+    --color-accent-contrast: #05201c;
+
+    --color-critical: #f08f85;
+    --color-critical-soft: #3a1c19;
+    --color-critical-line: #6b332d;
+    --color-critical-contrast: #2a100d;
+
+    --color-warning: #dfa953;
+    --color-warning-soft: #33280f;
+    --color-warning-line: #5c4720;
+
+    --color-positive: #6cc48d;
+    --color-positive-soft: #102b1b;
+    --color-positive-line: #275f3d;
+
+    --color-info: #74aae0;
+    --color-info-soft: #13273a;
+    --color-info-line: #2b4a6b;
+
+    --color-chronic: #a794dd;
+    --color-chronic-soft: #231d38;
+  }
+}
+
+:root[data-theme='dark'] {
+  --color-canvas: #0d1518;
+  --color-surface: #141f23;
+  --color-surface-sunk: #101a1d;
+  --color-surface-raised: #1a262b;
+
+  --color-ink: #e6eef0;
+  --color-ink-soft: #a5b8bf;
+  --color-ink-faint: #7a8f97;
+  --color-ink-inverse: #0d1518;
+
+  --color-line: #27363b;
+  --color-line-soft: #1e2b30;
+  --color-line-strong: #3a4c53;
+
+  --color-accent: #4fb3a4;
+  --color-accent-hover: #6ac4b6;
+  --color-accent-soft: #10312e;
+  --color-accent-contrast: #05201c;
+
+  --color-critical: #f08f85;
+  --color-critical-soft: #3a1c19;
+  --color-critical-line: #6b332d;
+  --color-critical-contrast: #2a100d;
+
+  --color-warning: #dfa953;
+  --color-warning-soft: #33280f;
+  --color-warning-line: #5c4720;
+
+  --color-positive: #6cc48d;
+  --color-positive-soft: #102b1b;
+  --color-positive-line: #275f3d;
+
+  --color-info: #74aae0;
+  --color-info-soft: #13273a;
+  --color-info-line: #2b4a6b;
+
+  --color-chronic: #a794dd;
+  --color-chronic-soft: #231d38;
+}
+
+/* ---- Base ------------------------------------------------------------ */
+
+@layer base {
+  * {
+    border-color: var(--color-line);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /*
+   * Focus must always be visible. Removing the focus ring is the single most
+   * common accessibility regression in an admin UI, and this product is
+   * keyboard-first by design — the consultation screen is unusable with a
+   * mouse alone at consultation speed.
+   */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+  }
+
+  /* Figures that sit in columns must line up. */
+  table,
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Identifiers, dosages and codes never reflow mid-token. */
+  .token {
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
+    white-space: nowrap;
+  }
+
+  ::placeholder {
+    color: var(--color-ink-faint);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer utilities {
+  /* Touch targets stay at least 44×44 even where the visual control is smaller. */
+  .tap-target {
+    position: relative;
+  }
+  .tap-target::after {
+    content: '';
+    position: absolute;
+    inset: 50% 50%;
+    width: 44px;
+    height: 44px;
+    transform: translate(-50%, -50%);
+  }
+
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-strong) transparent;
+  }
+}

@@ -1,0 +1,38 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# builds
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# env & secrets — never commit these
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# test / coverage
+coverage/
+playwright-report/
+test-results/
+
+# editor / os
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# local scratch
+.turbo/
+tmp/

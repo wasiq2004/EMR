@@ -1,0 +1,20 @@
+{
+  "name": "emr",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Clinic EMR for small outpatient practices in India",
+  "packageManager": "pnpm@10.20.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @emr/web dev",
+    "build": "pnpm --filter @emr/web build",
+    "start": "pnpm --filter @emr/web start",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  }
+}
