@@ -4,6 +4,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import * as TabsPrimitive from '@radix-ui/react-tabs';
+import type { Route } from 'next';
 import { cn } from '@/lib/cn';
 
 export const Tabs = TabsPrimitive.Root;
@@ -65,7 +66,12 @@ export function RouteTabs({
         return (
           <Link
             key={item.href}
-            href={item.href}
+            /*
+             * Cast once, here. Typed routes cannot narrow a template literal
+             * built from a runtime id, and every href reaching this component
+             * is composed from a route the build has already validated.
+             */
+            href={item.href as Route}
             aria-current={active ? 'page' : undefined}
             className={cn(
               'relative -mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors',

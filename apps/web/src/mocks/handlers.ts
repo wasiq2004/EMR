@@ -1000,5 +1000,151 @@ export async function handleMock(
     return ok({ items: store.auditEvents });
   }
 
+/* --- Documents and sharing --------------------------------------------- */
+
+  if (route === 'GET /documents') {
+    const patientId = search.get('patientId');
+    const q = (search.get('q') ?? '').toLowerCase();
+    let items = store.documents;
+    if (patientId) items = items.filter((d) => d.patientId === patientId);
+    if (q) {
+      items = items.filter(
+        (d) =>
+          d.title.toLowerCase().includes(q) ||
+          d.patientName.toLowerCase().includes(q),
+      );
+    }
+    return ok({ items });
+  }
+
+  if (segments[0] === 'documents' && segments[1] && segments.length === 2) {
+    const document = store.documents.find((d) => d.id === segments[1]);
+    return document ? ok(document) : problem(404, 'Document not found');
+  }
+
+  if (segments[0] === 'documents' && segments[2] === 'share' && method === 'POST') {
+    const document = store.documents.find((d) => d.id === segments[1]);
+    if (!document) return problem(404, 'Document not found');
+
+    // A patient upload that has not passed scanning must never be re-served.
+    if (document.virusScanStatus && document.virusScanStatus !== 'CLEAN') {
+      return problem(
+        403,
+        'This file has not completed security scanning',
+        'It cannot be shared until the scan confirms it is clean.',
+      );
+    }
+
+    const token = uuid().replace(/-/g, '');
+    return created({
+      url: `https://sunrise.app.example.in/share/${token}`,
+      expiresAt: new Date(Date.now() + 72 * 3_600_000).toISOString(),
+      requiresOtp: !['PRESCRIPTION', 'INVOICE'].includes(document.documentType),
+    });
+  }
+
+  /**
+   * The public share resolver.
+   *
+   * Every failure returns the SAME message. Distinguishing "expired" from
+   * "unknown" would confirm that a link once existed, which turns this endpoint
+   * into a way to probe for valid ones.
+   */
+  if (segments[0] === 'share' && segments[1] && method === 'POST') {
+    const input = body as { otp?: string | null };
+    if (!input?.otp) {
+      return {
+        status: 403,
+        body: {
+          type: 'about:blank',
+          title: 'Verification required',
+          status: 403,
+          detail: 'A verification code has been sent to the number ending 2300.',
+          code: 'OTP_REQUIRED',
+        },
+      };
+    }
+    if (input.otp !== '123456') {
+      return problem(403, 'Incorrect code', 'Check the code and try again.');
+    }
+    return ok({ title: 'Prescription, 15 July' });
+  }
+
+  /* --- Consent ------------------------------------------------------------ */
+
+  if (segments[0] === 'patients' && segments[2] === 'consents') {
+    return ok(store.consents.filter((c) => c.patientId === segments[1]));
+  }
+
+  /* --- Settings reference data -------------------------------------------- */
+
+  if (route === 'GET /services') return ok({ items: store.services });
+  if (route === 'GET /whatsapp/account') return ok(store.whatsappAccount);
+  if (route === 'GET /whatsapp/templates') return ok({ items: store.messageTemplates });
+
+  /* --- Appointments ------------------------------------------------------- */
+
+  if (route === 'POST /appointments') {
+    const input = body as Record<string, unknown>;
+    const service = store.services.find((s) => s.id === input.serviceItemId);
+    const start = new Date(String(input.scheduledStart));
+    const appointment: Appointment = {
+      id: uuid(),
+      patientId: String(input.patientId),
+      practitionerId: (input.practitionerId as string) ?? null,
+      locationId: null,
+      status: 'SCHEDULED',
+      scheduledStart: start.toISOString(),
+      // The service sets the slot length, so nobody has to remember it.
+      scheduledEnd: new Date(
+        start.getTime() + (service?.defaultDurationMinutes ?? 15) * 60_000,
+      ).toISOString(),
+      arrivedAt: null,
+      calledAt: null,
+      completedAt: null,
+      queuePosition: null,
+      isWalkIn: false,
+      reasonText: (input.reasonText as string) ?? null,
+      notes: null,
+      cancelledReason: null,
+      createdAt: nowIso(),
+      createdBy: null,
+      updatedAt: nowIso(),
+      updatedBy: null,
+      version: 1,
+    };
+    store.appointments.push(appointment);
+    return created(appointment);
+  }
+
+  /* --- Amendments --------------------------------------------------------- */
+
+  if (segments[0] === 'encounters' && segments[2] === 'amend' && method === 'POST') {
+    const original = store.encounters.find((e) => e.id === segments[1]);
+    if (!original) return problem(404, 'Consultation not found');
+    const input = body as { amendmentReason: string };
+
+    // A correction is a NEW record linked to the original. The original is
+    // never edited — the database enforces that with a trigger.
+    const amendment: Encounter = {
+      ...original,
+      id: uuid(),
+      startedAt: nowIso(),
+      endedAt: null,
+      status: 'IN_PROGRESS',
+      isFinalized: false,
+      finalizedAt: null,
+      finalizedBy: null,
+      amendsEncounterId: original.id,
+      amendmentReason: input.amendmentReason,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      version: 1,
+    };
+    store.encounters.push(amendment);
+    return created(amendment);
+  }
+
   return problem(404, 'Not found', `No mock handler for ${route}`);
 }
+

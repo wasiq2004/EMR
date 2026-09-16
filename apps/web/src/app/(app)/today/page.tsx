@@ -15,6 +15,7 @@ import {
   UserPlus,
   Users,
 } from 'lucide-react';
+import type { Route } from 'next';
 import type { ReportSummary, Task } from '@emr/contracts';
 import { api } from '@/lib/api-client';
 import { qk } from '@/lib/query-client';
@@ -602,7 +603,7 @@ function QuickLink({
   icon: Icon,
   label,
 }: {
-  href: string;
+  href: Route;
   icon: typeof Inbox;
   label: string;
 }) {

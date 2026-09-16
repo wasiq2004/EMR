@@ -15,6 +15,8 @@ import type {
   Allergy,
   Appointment,
   AuditEvent,
+  ClinicalDocument,
+  Consent,
   Conversation,
   Encounter,
   InternalNote,
@@ -27,6 +29,14 @@ import type {
   Task,
 } from '@emr/contracts';
 import { ALLERGIES, CLINIC, CONDITIONS, OBSERVATIONS, PATIENTS, STAFF } from './seed';
+import {
+  AUDIT_EVENTS,
+  MESSAGE_TEMPLATES,
+  SERVICES,
+  WHATSAPP_ACCOUNT,
+  seedConsents,
+  seedDocuments,
+} from './seed-extra';
 
 const days = (n: number) => n * 24 * 60 * 60 * 1000;
 const mins = (n: number) => n * 60 * 1000;
@@ -52,7 +62,12 @@ export const store = {
   invoices: [] as Invoice[],
   tasks: [] as Task[],
   internalNotes: [] as InternalNote[],
-  auditEvents: [] as AuditEvent[],
+  auditEvents: [...AUDIT_EVENTS] as AuditEvent[],
+  documents: [] as ClinicalDocument[],
+  consents: [] as Consent[],
+  services: [...SERVICES],
+  whatsappAccount: { ...WHATSAPP_ACCOUNT },
+  messageTemplates: [...MESSAGE_TEMPLATES],
   /** Proof that a duplicate search ran, keyed by token. */
   searchTokens: new Set<string>(),
   mrnCounter: 500,
@@ -555,3 +570,7 @@ export function nextMrn(): string {
 }
 
 export { uuid };
+
+/* Documents and consents for the Snapshot fixture patient. */
+store.documents = seedDocuments(P(3).id, P(3).fullName, DOCTOR.fullName);
+store.consents = seedConsents(P(3).id);

@@ -28,13 +28,14 @@ import {
   Users,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import type { Route } from 'next';
 import { can, type Permission, type UserRole } from '@emr/contracts';
 
 export type PanelId = 'front-desk' | 'doctor' | 'clinic-admin' | 'compliance';
 
 export interface NavItem {
   label: string;
-  href: string;
+  href: Route;
   icon: LucideIcon;
   /** Shown only if the role holds this permission. */
   permission: Permission;
@@ -222,7 +223,7 @@ export function navigationFor(role: UserRole): NavSection[] {
 }
 
 /** The route a role should land on after signing in. */
-export function landingRouteFor(role: UserRole): string {
+export function landingRouteFor(role: UserRole): Route {
   if (role === 'AUDITOR') return '/audit';
   return '/today';
 }
@@ -230,7 +231,7 @@ export function landingRouteFor(role: UserRole): string {
 /** Settings sub-navigation, filtered the same way. */
 export interface SettingsLink {
   label: string;
-  href: string;
+  href: Route;
   permission: Permission;
   description: string;
 }

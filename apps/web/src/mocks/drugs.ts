@@ -52,21 +52,66 @@ function item(
  * penicillin allergy fire on amoxicillin — the single highest-value safety
  * check available without a licence, because it is derived from the clinic's
  * own allergy records rather than from licensed reference data.
+ *
+ * EVERY CLASS MUST LIST ITS OWN NAME, including the plural and any common
+ * spelling. Clinicians very often record the class rather than a specific drug
+ * — "Sulfonamides", "NSAIDs", "Penicillin" — and if the class name is not a
+ * member of its own class, that allergy silently matches nothing. Penicillin
+ * used to work here only by accident, because "penicillin" is also a drug name.
  */
 export const ALLERGY_CLASSES: Record<string, string[]> = {
   penicillin: [
+    'penicillin',
+    'penicillins',
     'amoxicillin',
     'ampicillin',
-    'penicillin',
+    'benzylpenicillin',
     'cloxacillin',
     'piperacillin',
     'amoxicillin + clavulanic acid',
   ],
-  cephalosporin: ['cefixime', 'cefuroxime', 'ceftriaxone', 'cephalexin'],
-  sulfonamide: ['sulfamethoxazole', 'co-trimoxazole', 'sulfasalazine'],
-  nsaid: ['ibuprofen', 'diclofenac', 'naproxen', 'aceclofenac', 'aspirin'],
-  macrolide: ['azithromycin', 'clarithromycin', 'erythromycin'],
-  quinolone: ['ciprofloxacin', 'levofloxacin', 'ofloxacin'],
+  cephalosporin: [
+    'cephalosporin',
+    'cephalosporins',
+    'cefixime',
+    'cefuroxime',
+    'ceftriaxone',
+    'cephalexin',
+  ],
+  sulfonamide: [
+    'sulfonamide',
+    'sulfonamides',
+    'sulpha',
+    'sulfa',
+    'sulfamethoxazole',
+    'co-trimoxazole',
+    'cotrimoxazole',
+    'sulfasalazine',
+  ],
+  nsaid: [
+    'nsaid',
+    'nsaids',
+    'ibuprofen',
+    'diclofenac',
+    'naproxen',
+    'aceclofenac',
+    'aspirin',
+  ],
+  macrolide: [
+    'macrolide',
+    'macrolides',
+    'azithromycin',
+    'clarithromycin',
+    'erythromycin',
+  ],
+  quinolone: [
+    'quinolone',
+    'quinolones',
+    'fluoroquinolone',
+    'ciprofloxacin',
+    'levofloxacin',
+    'ofloxacin',
+  ],
 };
 
 export const DRUGS: DrugCatalogueItem[] = [
