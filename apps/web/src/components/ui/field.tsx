@@ -34,7 +34,7 @@ export const Label = React.forwardRef<
 Label.displayName = 'Label';
 
 const inputBase =
-  'w-full rounded-md border border-line bg-surface px-2.5 text-ink ' +
+  'w-full rounded-md border border-line-control bg-surface px-2.5 text-ink ' +
   'placeholder:text-ink-faint transition-colors ' +
   'focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/25 ' +
   'disabled:cursor-not-allowed disabled:bg-surface-sunk disabled:text-ink-faint ' +

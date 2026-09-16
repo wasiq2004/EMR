@@ -96,7 +96,9 @@ export function Omnibox() {
         <DialogContent size="md" className="p-0">
           <div className="flex items-center gap-2 border-b border-line-soft px-4 py-3">
             <Search className="size-4 shrink-0 text-ink-faint" aria-hidden />
-            {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
+            {/* Focused on open: the front desk's first action is always
+                "find this person", and a click to focus is time they
+                do not have during a morning rush. */}
             <input
               autoFocus
               value={term}

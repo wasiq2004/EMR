@@ -4,7 +4,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Download, Share2, ShieldAlert } from 'lucide-react';
+import { ArrowLeft, Download, Share2 } from 'lucide-react';
 import type { ClinicalDocument } from '@emr/contracts';
 import { api } from '@/lib/api-client';
 import { qk } from '@/lib/query-client';

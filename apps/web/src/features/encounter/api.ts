@@ -131,8 +131,19 @@ export function useEncounterAutosave(
 
   const dirty = React.useRef(false);
   const latest = React.useRef<EncounterDraft | null>(initial);
+
+  /**
+   * The row version we will send with the next save.
+   *
+   * Every successful save increments it server-side, so we read the new value
+   * back from the response. Taking it only from the query would go stale the
+   * moment the first autosave landed, and every save after that would be
+   * rejected as a conflict — on the one screen where losing the note matters
+   * most.
+   */
   const versionRef = React.useRef(version);
-  versionRef.current = version;
+  const serverVersion = React.useRef<number | null>(null);
+  versionRef.current = serverVersion.current ?? version;
 
   React.useEffect(() => {
     if (initial && draft === null) {
@@ -173,9 +184,13 @@ export function useEncounterAutosave(
       setState('saving');
 
       try {
-        await api.patch(`/encounters/${encounterId}`, latest.current, {
-          version: versionRef.current,
-        });
+        const saved = await api.patch<Encounter>(
+          `/encounters/${encounterId}`,
+          latest.current,
+          { version: versionRef.current },
+        );
+        // Carry the new version forward, or the next save is a stale write.
+        serverVersion.current = saved.version;
         setState('saved');
         setSavedAt(Date.now());
         void clearDraft(`encounter:${encounterId}`);
@@ -200,15 +215,42 @@ export function useEncounterAutosave(
     return () => globalThis.clearInterval(timer);
   }, [encounterId]);
 
+  /**
+   * Save immediately rather than waiting for the next tick.
+   *
+   * Called when the doctor leaves the screen. Without it, up to three seconds
+   * of typing is only on the device — recoverable, but the doctor would have to
+   * be told about it, and a note that reappears as a "recovered draft" when you
+   * expected it saved is alarming.
+   */
   const flush = React.useCallback(async () => {
-    if (!latest.current) return;
+    if (!latest.current || !dirty.current) return;
     dirty.current = false;
-    await api
-      .patch(`/encounters/${encounterId}`, latest.current, {
-        version: versionRef.current,
-      })
-      .catch(() => undefined);
+    try {
+      const saved = await api.patch<Encounter>(
+        `/encounters/${encounterId}`,
+        latest.current,
+        { version: versionRef.current },
+      );
+      serverVersion.current = saved.version;
+    } catch {
+      // Leave the local draft in place. The outbox or the recovery prompt on
+      // next open will deal with it — never silently discard the note.
+    }
   }, [encounterId]);
+
+  // Flush on unmount and when the tab is hidden, which is what a doctor
+  // switching windows mid-consultation actually does.
+  React.useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') void flush();
+    };
+    document.addEventListener('visibilitychange', onHide);
+    return () => {
+      document.removeEventListener('visibilitychange', onHide);
+      void flush();
+    };
+  }, [flush]);
 
   const discardRecovered = React.useCallback(() => {
     setRecovered(null);

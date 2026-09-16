@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import {
   ArrowLeft,
   Copy,
@@ -11,7 +11,6 @@ import {
   Plus,
   Thermometer,
   Trash2,
-  X,
 } from 'lucide-react';
 import type {
   Allergy,
@@ -39,7 +38,7 @@ import { useCan, useCanSign, useSession } from '@/lib/session';
 import { ageGender, formatDate } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Field, Input, Select, Textarea } from '@/components/ui/field';
+import { Field, Input, Textarea } from '@/components/ui/field';
 import { Panel, PanelBody, PanelHeader } from '@/components/ui/surface';
 import { Alert, SaveState, Skeleton } from '@/components/ui/feedback';
 import { useToast } from '@/components/ui/toast';
@@ -69,7 +68,6 @@ import { useToast } from '@/components/ui/toast';
 export default function ConsultationPage() {
   const params = useParams<{ id: string }>();
   const encounterId = params.id;
-  const router = useRouter();
   const toast = useToast();
   const session = useSession();
 

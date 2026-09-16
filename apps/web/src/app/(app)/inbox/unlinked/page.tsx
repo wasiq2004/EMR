@@ -9,7 +9,6 @@ import { api } from '@/lib/api-client';
 import { qk } from '@/lib/query-client';
 import { useConversations, useLinkConversation } from '@/features/inbox/api';
 import { ageGender, formatPhone, relativeTime } from '@/lib/format';
-import { Button } from '@/components/ui/button';
 import { Panel, PanelHeader, PageHeader } from '@/components/ui/surface';
 import { Alert, EmptyState, SkeletonRows } from '@/components/ui/feedback';
 import { useToast } from '@/components/ui/toast';

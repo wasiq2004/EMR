@@ -6,7 +6,7 @@ import { useParams } from 'next/navigation';
 import { ArrowLeft, Clock, Send } from 'lucide-react';
 import { isWindowOpen, windowRemainingMs } from '@emr/contracts';
 import { useConversation, useSendReply } from '@/features/inbox/api';
-import { formatCountdown, formatPhone, formatTime, relativeTime } from '@/lib/format';
+import { formatCountdown, formatPhone, formatTime } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';

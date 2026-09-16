@@ -4,7 +4,6 @@ import * as React from 'react';
 import { Check, Download, Upload } from 'lucide-react';
 import { IMPORT_TARGET_FIELDS } from '@emr/contracts';
 import { useCan } from '@/lib/session';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/field';
 import { Panel, PanelBody, PanelHeader } from '@/components/ui/surface';

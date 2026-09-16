@@ -23,7 +23,6 @@ import {
   MessageSquare,
   Settings,
   ShieldCheck,
-  Stethoscope,
   UserRound,
   Users,
 } from 'lucide-react';

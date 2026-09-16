@@ -18,19 +18,10 @@
 
 import type {
   Allergy,
-  Appointment,
-  ClinicalDocument,
   Condition,
-  Conversation,
-  DrugCatalogueItem,
-  Encounter,
-  Invoice,
-  Message,
   Observation,
   Patient,
-  ServiceItem,
   StaffUser,
-  Task,
 } from '@emr/contracts';
 
 const now = Date.now();

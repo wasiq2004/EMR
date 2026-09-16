@@ -63,12 +63,15 @@
 
   --color-ink: #10202a;
   --color-ink-soft: #445862;
-  --color-ink-faint: #6d838d;
+  --color-ink-faint: #5d737d;
   --color-ink-inverse: #f7fafb;
 
   --color-line: #d5dde1;
   --color-line-soft: #e6ecee;
   --color-line-strong: #b4c2c9;
+  /* Form-control borders. WCAG 1.4.11 wants 3:1 for a control boundary;
+     --color-line is a divider and is deliberately quieter than this. */
+  --color-line-control: #808e95;
 
   /* ---- Accent -------------------------------------------------------- */
   --color-accent: #0e6e63;
@@ -127,11 +130,14 @@
     --color-line: #27363b;
     --color-line-soft: #1e2b30;
     --color-line-strong: #3a4c53;
+  --color-line-control: #5a6c73;
+    --color-line-control: #5a6c73;
 
     --color-accent: #4fb3a4;
     --color-accent-hover: #6ac4b6;
     --color-accent-soft: #10312e;
     --color-accent-contrast: #05201c;
+    --color-accent-ink: #7fc4b5;
 
     --color-critical: #f08f85;
     --color-critical-soft: #3a1c19;
@@ -169,11 +175,13 @@
   --color-line: #27363b;
   --color-line-soft: #1e2b30;
   --color-line-strong: #3a4c53;
+  --color-line-control: #5a6c73;
 
   --color-accent: #4fb3a4;
   --color-accent-hover: #6ac4b6;
   --color-accent-soft: #10312e;
   --color-accent-contrast: #05201c;
+  --color-accent-ink: #7fc4b5;
 
   --color-critical: #f08f85;
   --color-critical-soft: #3a1c19;
