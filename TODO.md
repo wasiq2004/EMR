@@ -34,7 +34,7 @@ Checkpoint (build + typecheck + test + commit) after every 5 tasks.
 - [x] 7. Scheduling: live queue, walk-ins, reorder, appointments
 - [x] 8. Clinical: encounters, observations, conditions, allergies, internal notes
 - [x] 9. Prescribing: drug search, lines, safety checks, finalise and sign
-- [ ] 10. Documents: upload URLs, share links with OTP
+- [x] 10. Documents: upload URLs, share links with OTP
 
 > **CHECKPOINT 2 — CLEARED.** `scripts/verify/consultation-flow.sh` walks one
 > consultation end to end against the live database: the receptionist searches,
@@ -61,17 +61,19 @@ Checkpoint (build + typecheck + test + commit) after every 5 tasks.
 
 - [x] 16. Audit trail endpoint, import and export
 - [x] 17. Seed script carrying the Annex 5 acceptance fixtures
-- [ ] 18. Point the frontend at the real API and retire the mock path
-- [ ] 19. Docker: Postgres and Redis with health checks and init
-- [ ] 20. Docker: API image, multi-stage
+- [x] 18. Point the frontend at the real API and retire the mock path
+- [x] 19. Docker: Postgres and Redis with health checks and init
+- [x] 20. Docker: API image, multi-stage
 
-> **CHECKPOINT 4** — `docker compose up` brings up db, redis and api
+> **CHECKPOINT 4 — CLEARED.** `docker compose up` brings up Postgres, Redis, the
+> one-shot migrate/seed job, the API and the web app; all four report healthy,
+> and both verification suites pass against the containers.
 
 ## Stage 5 — Finish
 
-- [ ] 21. Docker: web image, multi-stage, standalone output
-- [ ] 22. `docker-compose.yml` wired end to end with env and health gates
-- [ ] 23. Migrate and seed inside the container, verify the stack live
+- [x] 21. Docker: web image, multi-stage, standalone output
+- [x] 22. `docker-compose.yml` wired end to end with env and health gates
+- [x] 23. Migrate and seed inside the container, verify the stack live
 - [ ] 24. Browser tests against the real backend
 - [ ] 25. UI polish pass
 

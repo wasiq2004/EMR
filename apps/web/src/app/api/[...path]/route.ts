@@ -10,12 +10,19 @@
  * rows — all three live behind the API's global guards, where they can be
  * verified from one place rather than by reading every route.
  *
- * When API_BASE_URL is unset the mock handlers answer instead, so the frontend
- * can be run and demonstrated before the API service exists.
+ * API_BASE_URL is REQUIRED. There was once a mock implementation here that
+ * answered when it was unset, and it had to go: a second implementation of every
+ * endpoint drifts from the first, and it drifts silently, because the screens go
+ * on working. The prescribing safety check is the cautionary tale — it ran in
+ * the browser, the server stored whatever the browser sent, and the whole thing
+ * looked correct from the outside for as long as nobody asked the server to
+ * check anything itself.
+ *
+ * `docker compose up` brings up the real API and the real database, so there is
+ * nothing a mock would buy.
  */
 
 import { NextResponse, type NextRequest } from 'next/server';
-import { MOCK_ROLE_COOKIE, handleMock } from '@/mocks/handlers';
 
 const API_BASE_URL = process.env.API_BASE_URL;
 
@@ -41,28 +48,17 @@ async function forward(request: NextRequest, path: string[]): Promise<Response> 
       : await request.text();
 
   if (!API_BASE_URL) {
-    const parsed = bodyText ? safeJson(bodyText) : undefined;
-    const result = await handleMock(
-      request.method,
-      `/${suffix}`,
-      url.searchParams,
-      parsed,
-      request.cookies.get(MOCK_ROLE_COOKIE)?.value,
+    // Refuse loudly. Returning empty data would make a misconfigured deployment
+    // look like a clinic with no patients.
+    return NextResponse.json(
+      {
+        type: 'about:blank',
+        title: 'This deployment is not configured',
+        status: 503,
+        detail: 'API_BASE_URL is not set, so there is no API to talk to.',
+      },
+      { status: 503, headers: { 'content-type': 'application/problem+json' } },
     );
-
-    const response =
-      result.status === 204
-        ? new NextResponse(null, { status: 204 })
-        : NextResponse.json(result.body, { status: result.status });
-
-    for (const cookie of result.cookies ?? []) {
-      response.cookies.set(cookie.name, cookie.value, {
-        path: '/',
-        sameSite: 'lax',
-        maxAge: cookie.maxAge,
-      });
-    }
-    return response;
   }
 
   const headers = new Headers();
@@ -93,14 +89,6 @@ async function forward(request: NextRequest, path: string[]): Promise<Response> 
   for (const cookie of setCookie) response.headers.append('set-cookie', cookie);
 
   return response;
-}
-
-function safeJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return undefined;
-  }
 }
 
 type Context = { params: Promise<{ path: string[] }> };

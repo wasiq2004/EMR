@@ -23,9 +23,15 @@
  * Nothing about an unavailable check appears anywhere — not a disabled control,
  * not a greyed-out panel. A doctor who believes interactions are being checked
  * and sees no warning is worse off than one who knows there is no check.
+ *
+ * The class table lives in @emr/contracts, not here, because the prescription
+ * pad warns on the same table before the doctor commits. Two copies means the
+ * browser can warn where the server does not — or, far worse, stay silent where
+ * the server would have refused.
  */
 
 import { and, eq, isNull, ne } from 'drizzle-orm';
+import { classesForNames, normaliseDrugName } from '@emr/contracts';
 import * as schema from '@emr/db/schema';
 import type { TenantTx } from '../../common/tenancy/tenant-db.service';
 
@@ -38,75 +44,6 @@ export interface SafetyWarning {
   substanceText: string | null;
   criticality: 'HIGH' | 'LOW' | 'UNABLE_TO_ASSESS' | null;
   recordedAt: string | null;
-}
-
-/**
- * Drug classes, for cross-reactivity.
- *
- * Deliberately short. Each entry is a class where a patient allergic to one
- * member should be warned about the others, and where getting it wrong has
- * killed people. It is not an attempt at a formulary — a long list assembled
- * without a clinical source would be more dangerous than this one, because its
- * length would imply a completeness it does not have.
- *
- * Cephalosporins are NOT listed as cross-reactive with penicillins. The real
- * rate is low and disputed, and warning on every cephalosporin for every
- * penicillin-allergic patient produces exactly the alert fatigue that makes
- * doctors stop reading warnings — which costs more lives than it saves.
- */
-const DRUG_CLASSES: { name: string; members: string[] }[] = [
-  {
-    name: 'penicillin',
-    members: [
-      'penicillin', 'benzylpenicillin', 'phenoxymethylpenicillin',
-      'amoxicillin', 'amoxycillin', 'ampicillin', 'cloxacillin',
-      'flucloxacillin', 'dicloxacillin', 'piperacillin', 'carbenicillin',
-      'clavulanic', 'sulbactam', 'tazobactam',
-    ],
-  },
-  {
-    name: 'sulfonamide',
-    members: [
-      'sulfonamide', 'sulphonamide', 'sulfamethoxazole', 'co-trimoxazole',
-      'cotrimoxazole', 'trimethoprim', 'sulfadiazine', 'sulfasalazine',
-    ],
-  },
-  {
-    name: 'NSAID',
-    members: [
-      'nsaid', 'aspirin', 'ibuprofen', 'diclofenac', 'aceclofenac',
-      'naproxen', 'indomethacin', 'ketorolac', 'piroxicam', 'nimesulide',
-      'mefenamic',
-    ],
-  },
-  {
-    name: 'quinolone',
-    members: [
-      'quinolone', 'fluoroquinolone', 'ciprofloxacin', 'levofloxacin',
-      'ofloxacin', 'norfloxacin', 'moxifloxacin',
-    ],
-  },
-  {
-    name: 'macrolide',
-    members: ['macrolide', 'erythromycin', 'azithromycin', 'clarithromycin', 'roxithromycin'],
-  },
-  {
-    name: 'tetracycline',
-    members: ['tetracycline', 'doxycycline', 'minocycline'],
-  },
-];
-
-const normalise = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-
-/** Every class whose member list contains any of the given terms. */
-function classesFor(terms: string[]): string[] {
-  const found = new Set<string>();
-  for (const term of terms) {
-    for (const group of DRUG_CLASSES) {
-      if (group.members.some((member) => term.includes(member))) found.add(group.name);
-    }
-  }
-  return [...found];
 }
 
 export async function evaluateSafety(
@@ -124,8 +61,8 @@ export async function evaluateSafety(
   // a brand name often carries the molecule inside it.
   const candidateTerms = [args.moleculeName, args.drugDisplayName]
     .filter((t): t is string => Boolean(t))
-    .map(normalise);
-  const candidateClasses = classesFor(candidateTerms);
+    .map(normaliseDrugName);
+  const candidateClasses = classesForNames(candidateTerms);
 
   /* ---- Allergies ------------------------------------------------------- */
 
@@ -144,7 +81,7 @@ export async function evaluateSafety(
   for (const allergy of allergies) {
     if (allergy.category !== 'MEDICATION') continue;
 
-    const substance = normalise(allergy.substanceText ?? '');
+    const substance = normaliseDrugName(allergy.substanceText ?? '');
     if (!substance) continue;
 
     const exact = candidateTerms.some(
@@ -153,7 +90,7 @@ export async function evaluateSafety(
 
     const sharedClass = exact
       ? null
-      : (classesFor([substance]).find((c) => candidateClasses.includes(c)) ?? null);
+      : (classesForNames([substance]).find((c) => candidateClasses.includes(c)) ?? null);
 
     if (!exact && !sharedClass) continue;
 
@@ -190,7 +127,7 @@ export async function evaluateSafety(
   /* ---- Duplicate therapy ----------------------------------------------- */
 
   if (args.moleculeName) {
-    const molecule = normalise(args.moleculeName);
+    const molecule = normaliseDrugName(args.moleculeName);
 
     const existing = await tx
       .select({
@@ -208,7 +145,7 @@ export async function evaluateSafety(
       );
 
     const duplicate = existing.find(
-      (line) => line.moleculeName && normalise(line.moleculeName) === molecule,
+      (line) => line.moleculeName && normaliseDrugName(line.moleculeName) === molecule,
     );
 
     if (duplicate) {

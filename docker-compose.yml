@@ -9,6 +9,11 @@
 # Postgres to answer queries, the migration job waits for the API's database,
 # and the web app waits for the API to report ready. A stack that races its own
 # dependencies fails intermittently, which is the worst way for it to fail.
+#
+# Secrets have NO defaults. `${JWT_SECRET:?...}` makes compose refuse to start
+# and say which variable is missing. A default would be a secret that everyone
+# who has ever cloned this repository already knows, and it would work — which
+# is exactly how it reaches production.
 
 name: emr
 
@@ -82,7 +87,10 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgres://${POSTGRES_USER:-emr_migrator}:${POSTGRES_PASSWORD:-emr_migrator}@postgres:5432/${POSTGRES_DB:-emr}
       MIGRATION_DATABASE_URL: postgres://${POSTGRES_USER:-emr_migrator}:${POSTGRES_PASSWORD:-emr_migrator}@postgres:5432/${POSTGRES_DB:-emr}
-      JWT_SECRET: ${JWT_SECRET:-development-only-not-a-secret-key}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env — see .env.example}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}
+      WORKER_DB_PASSWORD: ${WORKER_DB_PASSWORD:-}
+      READONLY_DB_PASSWORD: ${READONLY_DB_PASSWORD:-}
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
     command: ['sh', '-c', 'node dist/database/migrate.js && node dist/database/seed.js']
 
@@ -108,9 +116,9 @@ services:
     environment:
       NODE_ENV: production
       PORT: 4000
-      DATABASE_URL: postgres://emr_app:emr_app@postgres:5432/${POSTGRES_DB:-emr}
+      DATABASE_URL: postgres://emr_app:${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-emr}
       REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET:-development-only-not-a-secret-key}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env — see .env.example}
       STORAGE_DRIVER: local
       STORAGE_LOCAL_PATH: /var/lib/emr/objects
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}

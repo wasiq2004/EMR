@@ -27,7 +27,7 @@
  */
 
 import type { Allergy, PrescriptionLine, SafetyWarning } from '@emr/contracts';
-import { classesForMolecule } from '@/mocks/drugs';
+import { classesForMolecule } from '@emr/contracts';
 
 export interface DrugUnderConsideration {
   drugDisplayName: string;
@@ -46,6 +46,14 @@ export interface SafetyContext {
 function normalise(value: string): string {
   return value.toLowerCase().replace(/\s+/g, ' ').trim();
 }
+
+/*
+ * NOTE. This file warns; it does not decide. The API runs the same checks
+ * against the same class table in @emr/contracts and refuses a blocking warning
+ * that carries no override reason, so a prescription cannot be saved by
+ * bypassing this code. What happens here is that the doctor sees the warning
+ * before committing rather than after.
+ */
 
 /**
  * Checks one drug against one patient.

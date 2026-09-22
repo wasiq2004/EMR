@@ -33,6 +33,12 @@ COPY apps/api           apps/api
 RUN pnpm --filter @emr/api build
 
 # --- runtime -----------------------------------------------------------------
+# The workspace layout is preserved EXACTLY as pnpm built it, and that is not
+# tidiness. pnpm installs a package's dependencies as relative symlinks under
+# `apps/api/node_modules` pointing into the root `node_modules/.pnpm` store.
+# Flattening dist to /app breaks every one of them: Node resolves from the file's
+# own directory upwards, finds only the root node_modules — which under pnpm is
+# nearly empty — and the process dies on `Cannot find module 'pg'`.
 FROM base AS runner
 ENV NODE_ENV=production
 
@@ -40,11 +46,12 @@ ENV NODE_ENV=production
 RUN mkdir -p /var/lib/emr/objects && chown -R node:node /var/lib/emr
 
 COPY --from=build --chown=node:node /app/node_modules          ./node_modules
-COPY --from=build --chown=node:node /app/apps/api/node_modules ./apps/api/node_modules
-COPY --from=build --chown=node:node /app/apps/api/dist         ./dist
 COPY --from=build --chown=node:node /app/packages              ./packages
-COPY --from=build --chown=node:node /app/apps/api/package.json ./package.json
+COPY --from=build --chown=node:node /app/apps/api/node_modules ./apps/api/node_modules
+COPY --from=build --chown=node:node /app/apps/api/dist         ./apps/api/dist
+COPY --from=build --chown=node:node /app/apps/api/package.json ./apps/api/package.json
 
 USER node
+WORKDIR /app/apps/api
 EXPOSE 4000
 CMD ["node", "dist/main.js"]

@@ -91,9 +91,44 @@ async function run() {
       }
     }
 
+    await setRolePasswords(client);
+
     console.log('Migrations complete.');
   } finally {
     await client.end();
+  }
+}
+
+/**
+ * Rotates the login roles' passwords to whatever the environment supplies.
+ *
+ * The prelude creates each role with a literal password, because a migration
+ * has to be runnable by hand against an empty database and cannot read a
+ * secret manager. Those literals are fine for local development and are not
+ * fine anywhere else, so this runs straight after and replaces them.
+ *
+ * Silent when the variables are unset — that is the local case, and failing
+ * there would make `docker compose up` require a secret store.
+ */
+async function setRolePasswords(client: pg.Client): Promise<void> {
+  const roles: [string, string | undefined][] = [
+    ['emr_app', process.env.APP_DB_PASSWORD],
+    ['emr_worker_messaging', process.env.WORKER_DB_PASSWORD],
+    ['emr_readonly', process.env.READONLY_DB_PASSWORD],
+  ];
+
+  for (const [role, password] of roles) {
+    if (!password) continue;
+
+    // ALTER ROLE accepts no bind parameters, so the password has to be inlined.
+    // The role names come from the fixed list above and never from input; the
+    // password is escaped by doubling quotes, which is the whole of SQL string
+    // escaping when standard_conforming_strings is on — and it is, by default,
+    // and the prelude does not change it.
+    const literal = `'${password.replace(/'/g, "''")}'`;
+    await client.query(`ALTER ROLE ${role} PASSWORD ${literal}`);
+
+    console.log(`  password set for ${role}`);
   }
 }
 

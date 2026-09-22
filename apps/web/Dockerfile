@@ -32,6 +32,14 @@ RUN pnpm --filter @emr/web build
 FROM base AS runner
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
 
+# HOSTNAME must be pinned. Next's standalone server binds to `process.env
+# .HOSTNAME || '0.0.0.0'`, and Docker sets HOSTNAME to the container id — so
+# without this the server binds to the container's own name. Published ports
+# still work, which is what makes it confusing: the site is reachable from the
+# host and unreachable from inside the container, so the health check fails
+# forever and anything on the same network that talks to it by loopback breaks.
+ENV HOSTNAME=0.0.0.0 PORT=3000
+
 COPY --from=build --chown=node:node /app/apps/web/.next/standalone ./
 COPY --from=build --chown=node:node /app/apps/web/.next/static     ./apps/web/.next/static
 COPY --from=build --chown=node:node /app/apps/web/public           ./apps/web/public

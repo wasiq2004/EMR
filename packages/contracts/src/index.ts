@@ -12,6 +12,7 @@ export * from './rbac';
 export * from './patient';
 export * from './scheduling';
 export * from './clinical';
+export * from './drug-classes';
 export * from './comms';
 export * from './billing';
 export * from './ops';
