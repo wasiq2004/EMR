@@ -5,19 +5,23 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import {
   ArrowLeft,
+  Building2,
   Copy,
   Eye,
   Lock,
   Plus,
   Thermometer,
   Trash2,
+  Video,
 } from 'lucide-react';
 import type {
   Allergy,
+  ConsultationMode,
   DrugCatalogueItem,
   EncounterDraft,
   SafetyWarning,
 } from '@emr/contracts';
+import { CONSULTATION_MODE_LABEL } from '@emr/contracts';
 import { usePatient, usePatientSnapshot } from '@/features/patients/api';
 import { RecordVitalsDialog } from '@/features/patients/record-vitals-dialog';
 import { AllergyBanner } from '@/features/patients/allergy-banner';
@@ -29,6 +33,7 @@ import {
   useAddPrescriptionLine,
   useEncounter,
   useEncounterAutosave,
+  useSetConsultationMode,
   useInternalNotes,
   usePrescriptionLines,
   useRemovePrescriptionLine,
@@ -103,6 +108,7 @@ export default function ConsultationPage() {
     };
   }, [encounter.data]);
 
+  const setMode = useSetConsultationMode(encounterId);
   const autosave = useEncounterAutosave(
     encounterId,
     initialDraft,
@@ -222,6 +228,14 @@ export default function ConsultationPage() {
             Signed {formatDate(encounter.data.finalizedAt)}
           </Badge>
         ) : null}
+        <ConsultationModeControl
+          mode={encounter.data.consultationMode}
+          finalised={finalised}
+          pending={setMode.isPending}
+          onChange={(mode) =>
+            setMode.mutate({ mode, version: encounter.data!.version })
+          }
+        />
         <div className="ml-auto flex items-center gap-3">
           {!finalised ? (
             <SaveState state={autosave.state} savedAt={autosave.savedAt} />
@@ -698,5 +712,59 @@ function InternalNotesPanel({
         </form>
       </PanelBody>
     </Panel>
+  );
+}
+
+/**
+ * In person, or remote.
+ *
+ * A toggle rather than a question asked when the consultation opens. In-person
+ * is the overwhelming majority of visits in this segment, and putting a modal
+ * in front of every one of them to catch the rare case is the kind of friction
+ * that gets a product abandoned. It defaults to in person and is one click to
+ * change, for as long as the consultation is a draft.
+ *
+ * It is not decoration. Schedule X drugs and narcotics cannot be prescribed
+ * remotely at all, and the printed prescription carries a declaration that an
+ * in-person one must not carry — so this control changes what the doctor is
+ * allowed to do and what the document says.
+ *
+ * Once signed it renders as a plain statement: the mode is part of the signed
+ * record, and the immutability trigger would refuse the write anyway.
+ */
+function ConsultationModeControl({
+  mode,
+  finalised,
+  pending,
+  onChange,
+}: {
+  mode: ConsultationMode;
+  finalised: boolean;
+  pending: boolean;
+  onChange: (mode: ConsultationMode) => void;
+}) {
+  const remote = mode === 'TELECONSULTATION';
+  const Icon = remote ? Video : Building2;
+
+  if (finalised) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-ink-soft">
+        <Icon className="size-3.5" aria-hidden />
+        {CONSULTATION_MODE_LABEL[mode]}
+      </span>
+    );
+  }
+
+  return (
+    <Button
+      size="sm"
+      variant="secondary"
+      loading={pending}
+      onClick={() => onChange(remote ? 'IN_PERSON' : 'TELECONSULTATION')}
+      title="Schedule X medicines cannot be prescribed in a teleconsultation"
+    >
+      <Icon aria-hidden />
+      {CONSULTATION_MODE_LABEL[mode]}
+    </Button>
   );
 }

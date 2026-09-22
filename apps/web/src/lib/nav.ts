@@ -30,7 +30,12 @@ import type { LucideIcon } from 'lucide-react';
 import type { Route } from 'next';
 import { can, type Permission, type UserRole } from '@emr/contracts';
 
-export type PanelId = 'front-desk' | 'doctor' | 'clinic-admin' | 'compliance';
+export type PanelId =
+  | 'front-desk'
+  | 'doctor'
+  | 'nursing'
+  | 'clinic-admin'
+  | 'compliance';
 
 export interface NavItem {
   label: string;
@@ -49,11 +54,19 @@ export interface NavSection {
   items: NavItem[];
 }
 
-/** Which panel a role lands in. Drives the label in the sidebar header. */
+/**
+ * Which panel a role lands in. Drives the label in the sidebar header.
+ *
+ * A nurse gets the same SHELL and the same screens as a doctor — the navigation
+ * is filtered from the permission matrix, not from this map — but a different
+ * name for it. "Doctor" is what the workspace is called when a doctor is in it;
+ * telling a nurse she is in the Doctor panel is simply untrue, and a person
+ * reading their own job title back wrong every time they sign in notices.
+ */
 export const PANEL_FOR_ROLE: Record<UserRole, PanelId> = {
   RECEPTIONIST: 'front-desk',
   DOCTOR: 'doctor',
-  NURSE_ASSISTANT: 'doctor',
+  NURSE_ASSISTANT: 'nursing',
   OWNER_ADMIN: 'clinic-admin',
   AUDITOR: 'compliance',
 };
@@ -61,6 +74,7 @@ export const PANEL_FOR_ROLE: Record<UserRole, PanelId> = {
 export const PANEL_LABEL: Record<PanelId, string> = {
   'front-desk': 'Front Desk',
   doctor: 'Doctor',
+  nursing: 'Nursing',
   'clinic-admin': 'Clinic Admin',
   compliance: 'Compliance',
 };

@@ -246,17 +246,51 @@ export default function PrescriptionPreviewPage() {
 
         {/* The signature block must never be orphaned onto its own page. */}
         <footer className="mt-8 flex items-end justify-between gap-6 break-inside-avoid border-t border-[#ccc] pt-4">
-          <p className="max-w-xs text-2xs leading-relaxed text-[#666]">
-            This prescription was issued electronically. Medicines listed were
-            checked against allergies recorded at this clinic. Interaction
-            checking is not performed.
-          </p>
+          <div className="max-w-xs space-y-2">
+            <p className="text-2xs leading-relaxed text-[#666]">
+              This prescription was issued electronically. Medicines listed were
+              checked against allergies recorded at this clinic. Interaction
+              checking is not performed.
+            </p>
+            {/*
+              Required on a remote consultation and NOT on an in-person one, so
+              it is printed from the recorded mode rather than always or never.
+              Printing it on an in-person prescription would be a false
+              declaration; omitting it on a remote one leaves the document
+              incomplete.
+            */}
+            {encounter.data.consultationMode === 'TELECONSULTATION' ? (
+              <p className="text-2xs leading-relaxed font-medium text-[#444]">
+                Issued following a teleconsultation, in accordance with the
+                Telemedicine Practice Guidelines. The patient was not physically
+                examined.
+              </p>
+            ) : null}
+          </div>
           <div className="text-right">
             <div className="h-10" />
             <p className="border-t border-[#111] pt-1 text-sm font-semibold">
               {session.fullName}
             </p>
-            <p className="token text-2xs text-[#444]">Reg. MMC-2011-44821</p>
+            {session.qualifications ? (
+              <p className="text-2xs text-[#444]">{session.qualifications}</p>
+            ) : null}
+            {/*
+              The SIGNING doctor's number. This was a hardcoded literal, so every
+              prescription printed by every doctor in every clinic carried one
+              seeded practitioner's registration — which is a forged medical
+              document, not a cosmetic bug.
+            */}
+            {session.medicalRegistrationNumber ? (
+              <p className="token text-2xs text-[#444]">
+                Reg. {session.medicalRegistrationNumber}
+                {session.medicalCouncil ? ` · ${session.medicalCouncil}` : ''}
+              </p>
+            ) : (
+              <p className="text-2xs font-medium text-[#b3251b]">
+                No registration number on file — this prescription cannot be signed.
+              </p>
+            )}
             {finalised ? (
               <p className="mt-1 text-2xs text-[#666]">
                 Signed {formatDate(encounter.data.finalizedAt)}

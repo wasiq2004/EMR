@@ -22,7 +22,11 @@ export class ClinicalService {
   ) {}
 
   /** Opens a consultation, or returns the draft already open for this patient. */
-  async openEncounter(patientId: string, appointmentId: string | null): Promise<Encounter> {
+  async openEncounter(
+    patientId: string,
+    appointmentId: string | null,
+    consultationMode: 'IN_PERSON' | 'TELECONSULTATION' = 'IN_PERSON',
+  ): Promise<Encounter> {
     const ctx = TenantContext.require();
 
     return this.tenantDb.run(async (tx) => {
@@ -48,6 +52,9 @@ export class ClinicalService {
           practitionerId: ctx.userId,
           appointmentId,
           status: 'IN_PROGRESS',
+          // Decides whether the Schedule X prohibition applies and whether the
+          // printed prescription carries the teleconsultation declaration.
+          consultationMode,
           createdBy: ctx.userId,
           updatedBy: ctx.userId,
         })
@@ -105,6 +112,18 @@ export class ClinicalService {
         'assessmentNotes', 'planNotes', 'followUpAfterDays', 'followUpInstructions',
       ]) {
         if (key in patch) allowed[key] = patch[key];
+      }
+
+      /*
+       * Consultation mode is editable while the consultation is a draft — a
+       * doctor may open a visit and only then move it to a video call — but it
+       * is narrowed to the two valid values here rather than trusted from the
+       * body. Anything else would let a request turn the Schedule X prohibition
+       * off by sending a third string.
+       */
+      if ('consultationMode' in patch) {
+        allowed.consultationMode =
+          patch.consultationMode === 'TELECONSULTATION' ? 'TELECONSULTATION' : 'IN_PERSON';
       }
 
       const [updated] = await tx

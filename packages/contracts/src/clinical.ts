@@ -16,6 +16,7 @@ import {
   AllergyCategory,
   AllergyCriticality,
   ConditionClinicalStatus,
+  ConsultationMode,
   EncounterStatus,
   MedicationRequestStatus,
   ReactionSeverity,
@@ -282,6 +283,12 @@ export const Encounter = z.object({
   practitionerId: Uuid,
   appointmentId: Uuid.nullable(),
   status: EncounterStatus,
+  /**
+   * In the room, or remote. Read by the prescribing safety check and printed on
+   * the prescription — a teleconsultation carries a declaration that an
+   * in-person consultation does not.
+   */
+  consultationMode: ConsultationMode,
   startedAt: IsoDateTime,
   endedAt: IsoDateTime.nullable(),
 

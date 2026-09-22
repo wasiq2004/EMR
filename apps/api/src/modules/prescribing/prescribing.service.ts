@@ -127,6 +127,7 @@ export class PrescribingService {
         encounterId,
         drugDisplayName: String(input.drugDisplayName),
         moleculeName: (input.moleculeName as string) ?? null,
+        consultationMode: encounter.consultationMode,
       });
 
       const overrideReason =
@@ -134,11 +135,31 @@ export class PrescribingService {
           ? input.safetyOverrideReason.trim()
           : null;
 
-      const blocking = warnings.filter((w) => w.severity === 'BLOCKING');
+      /*
+       * Two gates, and the order matters.
+       *
+       * A NON-OVERRIDABLE warning is law, not clinical judgement — Schedule X in
+       * a teleconsultation. It is refused first and refused outright, because
+       * checking the override reason before it would imply that writing one
+       * could help.
+       */
+      const prohibited = warnings.filter((w) => !w.overridable);
+      if (prohibited.length > 0) {
+        throw new UnprocessableEntityException({
+          code: 'PRESCRIPTION_NOT_PERMITTED',
+          title: 'This medicine cannot be prescribed here',
+          message: prohibited.map((w) => w.title).join(' '),
+          warnings,
+        });
+      }
 
       // A blocking warning may be overridden, but not silently. Refusing until
       // a reason is written is the whole mechanism: it puts the decision, and
       // the name of whoever made it, into the record.
+      const blocking = warnings.filter(
+        (w) => w.severity === 'BLOCKING' && w.overridable,
+      );
+
       if (blocking.length > 0 && !overrideReason) {
         throw new UnprocessableEntityException({
           code: 'SAFETY_WARNING',

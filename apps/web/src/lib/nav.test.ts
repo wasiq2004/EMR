@@ -87,10 +87,18 @@ describe('Front Desk', () => {
   });
 });
 
-describe('Doctor and Nurse share one panel', () => {
-  it('both land in the same shell', () => {
+describe('Doctor and Nurse share one shell under different names', () => {
+  it('the nurse is not told she is a doctor', () => {
     expect(PANEL_FOR_ROLE.DOCTOR).toBe('doctor');
-    expect(PANEL_FOR_ROLE.NURSE_ASSISTANT).toBe('doctor');
+    expect(PANEL_FOR_ROLE.NURSE_ASSISTANT).toBe('nursing');
+  });
+
+  it('but the navigation they get is the same set, filtered by permission', () => {
+    const doctor = linksFor('DOCTOR').map((i) => i.href);
+    const nurse = linksFor('NURSE_ASSISTANT').map((i) => i.href);
+    // Every link the nurse sees is one the doctor sees. The panel name differs;
+    // the shell does not.
+    for (const href of nurse) expect(doctor).toContain(href);
   });
 
   it('the nurse sees the queue and the registry', () => {

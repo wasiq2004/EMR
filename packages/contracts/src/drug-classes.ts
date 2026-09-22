@@ -91,3 +91,51 @@ export function classesForNames(names: readonly string[]): string[] {
 export function classesForMolecule(moleculeName: string): string[] {
   return classesForNames([moleculeName]);
 }
+
+/**
+ * Molecules that may NOT be prescribed in a teleconsultation.
+ *
+ * India's Telemedicine Practice Guidelines put Schedule X drugs and narcotics on
+ * a prohibited list for remote consultation. This is law, not clinical
+ * judgement, which is why the check that uses it is the only one in the system
+ * with no override: there is no reason a doctor can write down that makes it
+ * lawful, so offering a box to write one in would be offering to help break it.
+ *
+ * Matched by MOLECULE, not by brand, because a doctor may type a brand the
+ * catalogue does not carry — and the catalogue's own `drug_schedule` column only
+ * helps for items that came from it.
+ *
+ * Deliberately short and deliberately incomplete: it covers the benzodiazepines
+ * and opioids a general outpatient clinic actually reaches for. A clinic
+ * stocking anything wider needs this list reviewed against the current schedule
+ * by someone qualified to do it.
+ */
+export const TELECONSULTATION_PROHIBITED_MOLECULES: readonly string[] = [
+  // Schedule X — benzodiazepines and related
+  'alprazolam', 'lorazepam', 'diazepam', 'clonazepam', 'nitrazepam',
+  'chlordiazepoxide', 'midazolam', 'zolpidem', 'zopiclone',
+  'phenobarbitone', 'phenobarbital', 'pentazocine', 'buprenorphine',
+  'amphetamine', 'methylphenidate', 'ketamine',
+  // Narcotics
+  'morphine', 'fentanyl', 'pethidine', 'tramadol', 'codeine', 'oxycodone',
+];
+
+/**
+ * Whether this drug is barred from a remote consultation.
+ *
+ * Checks both names. A brand frequently carries its molecule inside it, and a
+ * free-text prescription may carry nothing else.
+ */
+export function isTeleconsultationProhibited(
+  names: readonly (string | null | undefined)[],
+): string | null {
+  for (const name of names) {
+    if (!name) continue;
+    const normalised = normaliseDrugName(name);
+    const hit = TELECONSULTATION_PROHIBITED_MOLECULES.find((molecule) =>
+      normalised.includes(molecule),
+    );
+    if (hit) return hit;
+  }
+  return null;
+}

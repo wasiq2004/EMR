@@ -115,6 +115,20 @@ export const Session = z.object({
   clinicSlug: z.string(),
   /** Gates the signing action in the UI; the server checks it again. */
   hasMedicalRegistration: z.boolean(),
+  /**
+   * The practitioner's own registration number and council, for the signature
+   * block on a printed prescription.
+   *
+   * It has to travel, because a prescription bearing a registration number that
+   * is not the signing doctor's is a forged medical document — and the number
+   * was previously hardcoded in the print view, so every doctor in every clinic
+   * printed the same one.
+   *
+   * Null for everyone who cannot sign, which is most roles.
+   */
+  medicalRegistrationNumber: z.string().nullable(),
+  medicalCouncil: z.string().nullable(),
+  qualifications: z.string().nullable(),
   mfaEnabled: z.boolean(),
   /** Days remaining before two-factor enrolment is enforced. */
   mfaGraceDaysRemaining: z.number().int().nullable(),

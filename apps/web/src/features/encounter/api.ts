@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
+  ConsultationMode,
   Encounter,
   EncounterDraft,
   InternalNote,
@@ -77,6 +78,30 @@ export function useAddDiagnosis(encounterId: string, patientId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qk.encounter(encounterId) });
       void queryClient.invalidateQueries({ queryKey: qk.snapshot(patientId) });
+    },
+  });
+}
+
+/**
+ * Switches a draft consultation between in-person and remote.
+ *
+ * Its own mutation rather than a field on the autosaved draft. Autosave is
+ * debounced because it is fed by typing; this is a discrete decision that
+ * changes what the doctor is allowed to prescribe and what the printed
+ * prescription declares, so it saves at once and the screen shows the result.
+ */
+export function useSetConsultationMode(encounterId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: { mode: ConsultationMode; version: number }) =>
+      api.patch<Encounter>(
+        `/encounters/${encounterId}`,
+        { consultationMode: input.mode },
+        { version: input.version },
+      ),
+    onSuccess: (encounter) => {
+      queryClient.setQueryData(qk.encounter(encounterId), encounter);
     },
   });
 }

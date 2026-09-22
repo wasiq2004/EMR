@@ -110,6 +110,25 @@ export const encounterStatusEnum = pgEnum('encounter_status', [
   'ENTERED_IN_ERROR',
 ]);
 
+/**
+ * Whether the patient was in the room.
+ *
+ * Not cosmetic. India's Telemedicine Practice Guidelines put Schedule X drugs
+ * and narcotics on a prohibited list for teleconsultation — no exceptions and no
+ * clinical override — and a teleconsultation prescription must carry a
+ * declaration that an in-person one does not. Neither rule can be applied
+ * without knowing which kind of consultation this was, so the system recorded
+ * neither until this column existed.
+ *
+ * Defaults to IN_PERSON: that is the overwhelmingly common case in this segment,
+ * and it is the SAFE default, because it is the mode with fewer restrictions to
+ * get wrong in the other direction.
+ */
+export const consultationModeEnum = pgEnum('consultation_mode', [
+  'IN_PERSON',
+  'TELECONSULTATION',
+]);
+
 /** FHIR Condition.clinicalStatus. */
 export const conditionClinicalStatusEnum = pgEnum('condition_clinical_status', [
   'ACTIVE',

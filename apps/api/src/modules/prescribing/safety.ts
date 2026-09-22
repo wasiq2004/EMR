@@ -14,8 +14,9 @@
  * doctor commits, not after — but the browser's copy is for latency, and this
  * one is the record.
  *
- * WHAT IS CHECKED, AND WHAT IS NOT. Three checks run: an exact allergy match, a
- * drug-class allergy match, and duplicate therapy. Drug-to-drug interactions,
+ * WHAT IS CHECKED, AND WHAT IS NOT. Four checks run: an exact allergy match, a
+ * drug-class allergy match, duplicate therapy, and the teleconsultation
+ * prohibition. Drug-to-drug interactions,
  * contraindication against a condition, weight-based paediatric dosing and
  * pregnancy category are NOT checked, because each needs a licensed formulary
  * that has not been procured.
@@ -31,12 +32,20 @@
  */
 
 import { and, eq, isNull, ne } from 'drizzle-orm';
-import { classesForNames, normaliseDrugName } from '@emr/contracts';
+import {
+  classesForNames,
+  isTeleconsultationProhibited,
+  normaliseDrugName,
+} from '@emr/contracts';
 import * as schema from '@emr/db/schema';
 import type { TenantTx } from '../../common/tenancy/tenant-db.service';
 
 export interface SafetyWarning {
-  kind: 'ALLERGY_EXACT' | 'ALLERGY_CLASS' | 'DUPLICATE_THERAPY';
+  kind:
+    | 'ALLERGY_EXACT'
+    | 'ALLERGY_CLASS'
+    | 'DUPLICATE_THERAPY'
+    | 'SCHEDULE_X_TELEMEDICINE';
   severity: 'BLOCKING' | 'ADVISORY';
   overridable: boolean;
   title: string;
@@ -53,6 +62,7 @@ export async function evaluateSafety(
     encounterId: string;
     drugDisplayName: string;
     moleculeName: string | null;
+    consultationMode: 'IN_PERSON' | 'TELECONSULTATION';
   },
 ): Promise<SafetyWarning[]> {
   const warnings: SafetyWarning[] = [];
@@ -122,6 +132,40 @@ export async function evaluateSafety(
       criticality: allergy.criticality as SafetyWarning['criticality'],
       recordedAt: allergy.recordedAt?.toISOString() ?? null,
     });
+  }
+
+  /* ---- The teleconsultation prohibition --------------------------------- */
+
+  /*
+   * The only check here that cannot be overridden.
+   *
+   * Every other warning is clinical judgement, and a doctor may have a reason
+   * the record does not know. This one is law: Schedule X drugs and narcotics
+   * may not be prescribed in a remote consultation at all. There is no reason a
+   * doctor can write down that makes it lawful, so offering a box to write one
+   * in would be offering to help break it.
+   */
+  if (args.consultationMode === 'TELECONSULTATION') {
+    const prohibited = isTeleconsultationProhibited([
+      args.moleculeName,
+      args.drugDisplayName,
+    ]);
+
+    if (prohibited) {
+      warnings.push({
+        kind: 'SCHEDULE_X_TELEMEDICINE',
+        severity: 'BLOCKING',
+        overridable: false,
+        title: `${args.drugDisplayName} cannot be prescribed in a teleconsultation`,
+        detail:
+          `${prohibited} is on the prohibited list for remote consultation under ` +
+          'the Telemedicine Practice Guidelines. It can be prescribed at an ' +
+          'in-person visit.',
+        substanceText: args.moleculeName ?? args.drugDisplayName,
+        criticality: null,
+        recordedAt: null,
+      });
+    }
   }
 
   /* ---- Duplicate therapy ----------------------------------------------- */

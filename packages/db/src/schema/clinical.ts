@@ -38,6 +38,7 @@ import {
   documentStatusEnum,
   documentTypeEnum,
   encounterStatusEnum,
+  consultationModeEnum,
   medicationRequestStatusEnum,
   observationStatusEnum,
   primaryKeyColumn,
@@ -73,6 +74,15 @@ export const encounter = pgTable(
     locationId: uuid('location_id'),
 
     status: encounterStatusEnum('status').notNull().default('IN_PROGRESS'),
+
+    /**
+     * In the room, or remote. Decides whether the Schedule X prohibition
+     * applies and whether the printed prescription carries the teleconsultation
+     * declaration. See `consultationModeEnum`.
+     */
+    consultationMode: consultationModeEnum('consultation_mode')
+      .notNull()
+      .default('IN_PERSON'),
 
     startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
     endedAt: timestamp('ended_at', { withTimezone: true }),

@@ -45,6 +45,22 @@ export const EncounterStatus = z.enum([
 ]);
 export type EncounterStatus = z.infer<typeof EncounterStatus>;
 
+/**
+ * Whether the patient was in the room.
+ *
+ * Gates two things that are law rather than preference: Schedule X drugs and
+ * narcotics may not be prescribed in a teleconsultation at all, and a
+ * teleconsultation prescription must carry a declaration an in-person one does
+ * not.
+ */
+export const ConsultationMode = z.enum(['IN_PERSON', 'TELECONSULTATION']);
+export type ConsultationMode = z.infer<typeof ConsultationMode>;
+
+export const CONSULTATION_MODE_LABEL: Record<ConsultationMode, string> = {
+  IN_PERSON: 'In person',
+  TELECONSULTATION: 'Teleconsultation',
+};
+
 export const ConditionClinicalStatus = z.enum([
   'ACTIVE',
   'RECURRENCE',

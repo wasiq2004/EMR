@@ -352,6 +352,12 @@ function toSession(
     // Holding DOCTOR is not enough to sign; the registration number is a legal
     // element of the prescription and would otherwise print blank.
     hasMedicalRegistration: Boolean(user.medicalRegistrationNumber),
+    // Travels so the signature block prints the SIGNING doctor's number. It was
+    // hardcoded in the print view, which meant every prescription from every
+    // clinic carried one seeded doctor's registration.
+    medicalRegistrationNumber: user.medicalRegistrationNumber ?? null,
+    medicalCouncil: user.medicalCouncil ?? null,
+    qualifications: user.qualifications ?? null,
     mfaEnabled: user.mfaEnabled,
     mfaGraceDaysRemaining: graceRemaining,
   };

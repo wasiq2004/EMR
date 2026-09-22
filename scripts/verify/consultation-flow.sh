@@ -88,6 +88,10 @@ echo "-- the doctor consults --"
 login anjali.mehta@sunriseclinic.in
 req POST /encounters "{\"patientId\":\"$NEW_PID\"}"
 check "open a consultation" 201 "$CODE" "$BODY"
+# Asserted here, on a patient registered seconds ago, because opening a
+# consultation RESUMES an existing draft rather than starting a second one —
+# so this is the only point in the run where the encounter is certainly new.
+printf '%s' "$BODY" | grep -q '"consultationMode":"IN_PERSON"'   && check "a new consultation defaults to in person" y y   || check "a new consultation defaults to in person" y n
 ENC=$(jget "$BODY" id)
 VER=$(jnum "$BODY" version)
 
@@ -159,6 +163,51 @@ req POST "/encounters/$LENC/prescriptions" '{
 }'
 check "a duplicate molecule is still accepted" 201 "$CODE" "$BODY"
 printf '%s' "$BODY" | grep -q DUPLICATE_THERAPY   && check "duplicate therapy is flagged" y y   || check "duplicate therapy is flagged" y n
+
+echo "-- the teleconsultation prohibition --"
+# Schedule X in a remote consultation is barred by law, not by clinical
+# judgement, so unlike the allergy gate it has NO override. The same drug at an
+# in-person visit is fine, which is what makes the flag worth carrying.
+req GET '/patients?q=arjun'
+TP=$(jget "$BODY" id)
+
+req POST /encounters "{\"patientId\":\"$TP\"}"
+TENC=$(jget "$BODY" id)
+
+# Normalise, because this patient's draft survives between runs and the previous
+# run left it remote. The test is about the TRANSITION, so it sets its start.
+req GET "/encounters/$TENC"
+TV=$(jnum "$BODY" version)
+req PATCH "/encounters/$TENC" '{"consultationMode":"IN_PERSON"}' "If-Match: ${TV:-1}"
+printf '%s' "$BODY" | grep -q '"consultationMode":"IN_PERSON"'   && check "a remote consultation can be moved back to in person" y y   || check "a remote consultation can be moved back to in person" y n
+
+req POST "/encounters/$TENC/prescriptions" '{
+  "drugDisplayName":"Alprax 0.25","moleculeName":"Alprazolam","strength":"0.25 mg",
+  "dosageForm":"Tablet","route":"Oral","frequency":"0-0-1","durationDays":5
+}'
+check "Schedule X is allowed at an in-person visit" 201 "$CODE" "$BODY"
+
+req GET "/encounters/$TENC"
+TV=$(jnum "$BODY" version)
+req PATCH "/encounters/$TENC" '{"consultationMode":"TELECONSULTATION"}' "If-Match: ${TV:-1}"
+check "a draft can be switched to remote" 200 "$CODE" "$BODY"
+
+# With an override reason, which must make no difference whatsoever.
+req POST "/encounters/$TENC/prescriptions" '{
+  "drugDisplayName":"Alprax 0.25","moleculeName":"Alprazolam","strength":"0.25 mg",
+  "dosageForm":"Tablet","route":"Oral","frequency":"0-0-1","durationDays":5,
+  "safetyOverrideReason":"Long-term stable patient, I accept responsibility."
+}'
+check "Schedule X is refused in a teleconsultation" 422 "$CODE" "$BODY"
+printf '%s' "$BODY" | grep -q '"overridable":false'   && check "and a written reason cannot override it" y y   || check "and a written reason cannot override it" y n
+printf '%s' "$BODY" | grep -qi "in-person"   && check "the refusal says what the doctor CAN do" y y   || check "the refusal says what the doctor CAN do" y n
+
+# A non-prohibited medicine on the same remote consultation must still work.
+req POST "/encounters/$TENC/prescriptions" '{
+  "drugDisplayName":"Crocin 650","moleculeName":"Paracetamol","strength":"650 mg",
+  "dosageForm":"Tablet","route":"Oral","frequency":"1-1-1","durationDays":3
+}'
+check "an ordinary medicine is unaffected by the mode" 201 "$CODE" "$BODY"
 
 echo "-- finalising --"
 req POST "/encounters/$ENC/finalise" "" "If-Match: ${VER:-1}"

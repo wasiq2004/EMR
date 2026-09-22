@@ -116,7 +116,12 @@ export function useStartConsultation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (input: { patientId: string; appointmentId?: string | null }) =>
+    mutationFn: (input: {
+      patientId: string;
+      appointmentId?: string | null;
+      /** Defaults to IN_PERSON on the server when omitted. */
+      consultationMode?: 'IN_PERSON' | 'TELECONSULTATION';
+    }) =>
       api.post<{ id: string }>('/encounters', input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qk.queue() });

@@ -150,8 +150,9 @@ screen, and the migration fails if a fourth appears.
 
 ## What it deliberately does not do
 
-The prescribing module checks allergies (exact and by drug class) and duplicate
-therapy. It does **not** check drug-to-drug interactions, contraindication
+The prescribing module checks allergies (exact and by drug class), duplicate
+therapy, and the teleconsultation prohibition. It does **not** check
+drug-to-drug interactions, contraindication
 against a recorded condition, weight-based paediatric dosing or pregnancy
 category, because each needs a licensed formulary that has not been procured.
 
@@ -160,6 +161,13 @@ panel, not a "coming soon", not an empty interactions section. A doctor who
 believes interaction checking is running and sees no warning reasonably concludes
 there is no interaction, and the product put them in that position. Absence of a
 feature is honest; a non-functioning safety feature is not.
+
+One of those four is different in kind. An allergy warning is clinical
+judgement, so it blocks but can be overridden with a reason that is written into
+the record. Schedule X drugs and narcotics in a teleconsultation are barred by
+the Telemedicine Practice Guidelines — that is law, and there is no reason a
+doctor can write down that makes it lawful, so the refusal has no override at
+all. Offering a box to type one into would be offering to help break it.
 
 The checks that do run are computed **on the server** and the server's result is
 what gets stored. The browser runs the same checks against the same class table
@@ -175,10 +183,10 @@ before the doctor commits, not after.
   seeded. There is no Business API credential, so nothing is actually sent.
 - **No mail provider.** Inviting a staff member returns a one-time password to
   read out rather than pretending an email was sent.
-- **Schedule X telemedicine restriction is not enforced.** An encounter has no
-  in-person/remote flag, so the condition that triggers the rule cannot be
-  evaluated — and per the rule above, a check that cannot run shows nothing.
-  Adding the flag is the prerequisite.
+- **Teleconsultation is recorded, not conducted.** A consultation can be marked
+  remote — which enforces the Schedule X prohibition and adds the required
+  declaration to the printed prescription — but there is no video calling in the
+  product. The doctor uses whatever they already use.
 - **Local disk object storage.** `STORAGE_DRIVER=s3` exists; the local driver is
   the default and is not suitable for more than one API replica.
 - **`next build` fails on Windows without Developer Mode.** Next's standalone

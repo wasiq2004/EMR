@@ -18,10 +18,20 @@ export class ClinicalController {
   @RequirePermission('encounter:create')
   @Audit('ENCOUNTER_OPENED', 'encounter')
   @Post('encounters')
-  open(@Body() body: { patientId: string; appointmentId?: string | null }) {
+  open(
+    @Body()
+    body: {
+      patientId: string;
+      appointmentId?: string | null;
+      consultationMode?: 'IN_PERSON' | 'TELECONSULTATION';
+    },
+  ) {
     return this.clinical.openEncounter(
       requireUuid(body?.patientId, 'Patient'),
       body?.appointmentId ?? null,
+      // Anything other than the explicit remote value is in person. An unknown
+      // string must not be able to turn the Schedule X prohibition off.
+      body?.consultationMode === 'TELECONSULTATION' ? 'TELECONSULTATION' : 'IN_PERSON',
     );
   }
 
