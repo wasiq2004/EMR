@@ -22,12 +22,20 @@ export class CommsController {
   @RequirePermission('communication:create')
   @Audit('MESSAGE_SENT', 'communication')
   @Post('inbox/conversations/:id/reply')
-  reply(@Param('id') id: string, @Body() body: { body: string; templateName?: string | null }) {
-    return this.comms.reply(
-      requireUuid(id, 'Conversation'),
-      String(body?.body ?? '').trim(),
-      body?.templateName ?? null,
-    );
+  reply(
+    @Body()
+    body: {
+      body?: string;
+      templateId?: string | null;
+      templateVariables?: Record<string, string>;
+    },
+    @Param('id') id: string,
+  ) {
+    return this.comms.reply(requireUuid(id, 'Conversation'), {
+      body: body?.body,
+      templateId: body?.templateId ?? null,
+      templateVariables: body?.templateVariables,
+    });
   }
 
   @RequirePermission('communication:create')

@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { ArrowLeft, Link2Off, PanelRight, Send, SendHorizonal } from 'lucide-react';
+import { ArrowLeft, Link2Off, PanelRight, SendHorizonal } from 'lucide-react';
 import type {
   CommunicationStatus,
   Conversation,
@@ -17,6 +17,7 @@ import { useToast } from '@/components/ui/toast';
 import { DayDivider, MessageBubble } from './message-bubble';
 import { WindowBar, useWindowCountdown } from './window-bar';
 import { useConversation, useSendReply } from './api';
+import { TemplateButton, TemplatePicker } from './template-picker';
 
 /**
  * One conversation.
@@ -53,8 +54,8 @@ export function ChatWindow({
   const send = useSendReply(conversationId);
 
   const [draft, setDraft] = React.useState('');
-  const [templateName, setTemplateName] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState<Message[]>([]);
+  const [pickerOpen, setPickerOpen] = React.useState(false);
 
   const conversation = data?.conversation;
   const { open: windowOpen } = useWindowCountdown(conversation?.windowExpiresAt ?? null);
@@ -68,8 +69,8 @@ export function ChatWindow({
   // cannot be sent to the wrong patient.
   React.useEffect(() => {
     setDraft('');
-    setTemplateName(null);
     setPending([]);
+    setPickerOpen(false);
   }, [conversationId]);
 
   const messages = React.useMemo(() => {
@@ -103,19 +104,25 @@ export function ChatWindow({
       element.scrollHeight - element.scrollTop - element.clientHeight < 120;
   };
 
+  // Free text needs an open window. A template does not, which is why the
+  // template button is not gated on it.
   const canSend = Boolean(
-    conversation &&
-      !conversation.isOptedOut &&
-      (windowOpen ? draft.trim() : templateName),
+    conversation && !conversation.isOptedOut && windowOpen && draft.trim(),
   );
 
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!canSend || !conversation) return;
-
-    const body = windowOpen
-      ? draft.trim()
-      : (approved.find((t) => t.name === templateName)?.body ?? '');
+  /**
+   * Adds the bubble immediately, sends, and reconciles.
+   *
+   * Shared by both paths so a template send behaves exactly like a typed one —
+   * it appears at once and turns into the server's row when that arrives.
+   */
+  const sendWith = async (
+    payload: { body?: string; templateId?: string; templateVariables?: Record<string, string> },
+    optimisticBody: string,
+    kind: 'SESSION' | 'TEMPLATE',
+    templateLabel: string | null,
+  ) => {
+    if (!conversation) return;
 
     const optimistic: Message = {
       id: `pending-${Date.now()}`,
@@ -124,9 +131,9 @@ export function ChatWindow({
       channel: 'WHATSAPP',
       direction: 'OUTBOUND',
       status: 'QUEUED',
-      messageKind: windowOpen ? 'SESSION' : 'TEMPLATE',
-      templateName: windowOpen ? null : templateName,
-      body,
+      messageKind: kind,
+      templateName: templateLabel,
+      body: optimisticBody,
       documentId: null,
       documentTitle: null,
       providerErrorMessage: null,
@@ -140,21 +147,48 @@ export function ChatWindow({
     };
 
     setPending((current) => [...current, optimistic]);
-    setDraft('');
     atBottomRef.current = true;
 
     try {
-      await send.mutateAsync({ body, templateName: windowOpen ? null : templateName });
-      setTemplateName(null);
+      await send.mutateAsync(payload);
+      setPickerOpen(false);
     } catch (error) {
       // Put the text back in the composer. Losing a typed reply to a failed
       // send is the single most annoying thing a chat client can do.
       setPending((current) => current.filter((m) => m.id !== optimistic.id));
-      if (windowOpen) setDraft(body);
+      if (kind === 'SESSION') setDraft(optimisticBody);
       toast.error(
         error instanceof ApiError ? error.message : 'That message could not be sent',
       );
     }
+  };
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!canSend) return;
+    const body = draft.trim();
+    setDraft('');
+    await sendWith({ body }, body, 'SESSION', null);
+  };
+
+  const sendTemplate = async (templateId: string, variables: Record<string, string>) => {
+    const template = approved.find((t) => t.id === templateId);
+    if (!template) return;
+
+    // The preview the picker showed is what goes on the thread, because that is
+    // what the patient receives — a bubble reading "Namaste {{1}}" is a record
+    // of nothing.
+    const filled = template.body.replace(
+      /\{\{\s*(\d+)\s*\}\}/g,
+      (match, index: string) => variables[index]?.trim() || match,
+    );
+
+    await sendWith(
+      { templateId, templateVariables: variables },
+      filled,
+      'TEMPLATE',
+      template.name,
+    );
   };
 
   if (isLoading || !conversation) {
@@ -256,12 +290,20 @@ export function ChatWindow({
         optedOut={conversation.isOptedOut}
         draft={draft}
         onDraftChange={setDraft}
-        templates={approved}
-        templateName={templateName}
-        onTemplateChange={setTemplateName}
+        hasTemplates={approved.length > 0}
+        onOpenTemplates={() => setPickerOpen(true)}
         canSend={canSend}
         sending={send.isPending}
         onSubmit={submit}
+      />
+
+      <TemplatePicker
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        templates={templates}
+        patientName={conversation.patientName}
+        sending={send.isPending}
+        onSend={sendTemplate}
       />
     </section>
   );
@@ -270,18 +312,23 @@ export function ChatWindow({
 /**
  * The composer.
  *
- * It does not offer free text outside the window and then fail — the control
- * itself changes, because the rule is absolute and the interface should not
- * invite an action it knows will be refused.
+ * The template button is ALWAYS there. Outside the window it is the primary
+ * action, because a template is then the only thing that can be sent; inside
+ * it, it sits beside the text box as the faster correct way to send the message
+ * a clinic sends most — "your report is ready". Hiding it until the window
+ * closes would put the common case behind the uncommon state.
+ *
+ * The text box itself does not appear outside the window. The rule is absolute,
+ * and offering a control that is guaranteed to be refused is worse than not
+ * offering it.
  */
 function Composer({
   windowOpen,
   optedOut,
   draft,
   onDraftChange,
-  templates,
-  templateName,
-  onTemplateChange,
+  hasTemplates,
+  onOpenTemplates,
   canSend,
   sending,
   onSubmit,
@@ -290,9 +337,8 @@ function Composer({
   optedOut: boolean;
   draft: string;
   onDraftChange: (value: string) => void;
-  templates: WhatsappTemplate[];
-  templateName: string | null;
-  onTemplateChange: (name: string | null) => void;
+  hasTemplates: boolean;
+  onOpenTemplates: () => void;
   canSend: boolean;
   sending: boolean;
   onSubmit: (event: React.FormEvent) => void;
@@ -300,47 +346,26 @@ function Composer({
   if (optedOut) return null;
 
   if (!windowOpen) {
-    if (templates.length === 0) return null;
+    if (!hasTemplates) return null;
 
     return (
-      <form onSubmit={onSubmit} className="border-t border-line bg-surface p-3">
-        <label
-          htmlFor="reply-template"
-          className="mb-1.5 block text-2xs font-medium uppercase tracking-wide text-ink-faint"
-        >
-          Send an approved template
-        </label>
-        <div className="flex gap-2">
-          <select
-            id="reply-template"
-            value={templateName ?? ''}
-            onChange={(event) => onTemplateChange(event.target.value || null)}
-            className="h-9 min-w-0 flex-1 rounded-md border border-line-control bg-surface px-2 text-sm text-ink"
-          >
-            <option value="">Choose a template…</option>
-            {templates.map((template) => (
-              <option key={template.id} value={template.name}>
-                {template.name}
-              </option>
-            ))}
-          </select>
-          <Button type="submit" variant="primary" disabled={!canSend} loading={sending}>
-            <Send aria-hidden />
-            Send
-          </Button>
-        </div>
-
-        {templateName ? (
-          <p className="mt-2 rounded-md bg-surface-sunk px-2.5 py-2 text-xs whitespace-pre-wrap text-ink-soft">
-            {templates.find((t) => t.name === templateName)?.body}
-          </p>
-        ) : null}
-      </form>
+      <div className="flex items-center gap-3 border-t border-line bg-surface p-3">
+        <p className="min-w-0 flex-1 text-xs text-ink-faint">
+          Free replies are closed for this patient. An approved template can
+          still be sent.
+        </p>
+        <TemplateButton onClick={onOpenTemplates} forced />
+      </div>
     );
   }
 
   return (
-    <form onSubmit={onSubmit} className="flex items-end gap-2 border-t border-line bg-surface p-3">
+    <form
+      onSubmit={onSubmit}
+      className="flex items-end gap-2 border-t border-line bg-surface p-3"
+    >
+      {hasTemplates ? <TemplateButton onClick={onOpenTemplates} forced={false} /> : null}
+
       <label htmlFor="reply-body" className="sr-only">
         Your reply
       </label>

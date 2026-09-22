@@ -224,6 +224,34 @@ RENC=$(jget "$BODY" id)
 req POST "/encounters/$RENC/finalise" "" "If-Match: 1"
 check "an unregistered doctor is refused at signing" 403 "$CODE" "$BODY"
 
+echo "-- an approved template is sendable in the inbox, window or not --"
+login priya.k@sunriseclinic.in
+req GET /whatsapp/templates
+TPL=$(jget "$BODY" id)
+
+req GET /inbox/conversations
+# The first conversation that is neither opted out nor closed.
+CONV=$(printf '%s' "$BODY" | tr '}' '
+' | grep -v '"isOptedOut":true' | grep -o '"id":"[0-9a-f-]\{36\}"' | head -1 | cut -d'"' -f4)
+
+if [ -n "$TPL" ] && [ -n "$CONV" ]; then
+  # A template, INSIDE the open window. This is the case that used to be
+  # unreachable: templates were offered only once the window had closed.
+  req POST "/inbox/conversations/$CONV/reply"     "{\"templateId\":\"$TPL\",\"templateVariables\":{\"1\":\"Sunita\",\"2\":\"1 November\"}}"
+  check "a template sends inside an open window" 201 "$CODE" "$BODY"
+  printf '%s' "$BODY" | grep -q '"messageKind":"TEMPLATE"'     && check "it is recorded as a template" y y     || check "it is recorded as a template" y n
+  printf '%s' "$BODY" | grep -q 'Namaste Sunita'     && check "the stored body is FILLED, not the raw placeholders" y y     || check "the stored body is FILLED, not the raw placeholders" y n
+  printf '%s' "$BODY" | grep -q '"status":"SENT"'     && check "it is actually dispatched, not left queued" y y     || check "it is actually dispatched, not left queued" y n
+
+  # Free text also has to really go out — it used to be written QUEUED and
+  # dropped, with the interface showing a sent message.
+  req POST "/inbox/conversations/$CONV/reply" '{"body":"See you then."}'
+  check "free text sends inside the window" 201 "$CODE" "$BODY"
+  printf '%s' "$BODY" | grep -q '"status":"SENT"'     && check "and is dispatched too" y y     || check "and is dispatched too" y n
+else
+  check "a template and a conversation exist to test with" y n
+fi
+
 echo "-- billing --"
 login priya.k@sunriseclinic.in
 req POST /invoices "{\"patientId\":\"$NEW_PID\",\"lineItems\":[{\"description\":\"New consultation\",\"quantity\":1,\"unitPricePaise\":60000,\"amountPaise\":60000}]}"

@@ -67,7 +67,7 @@ Three suites, each testing something the others cannot.
 
 ```bash
 # 1. The API, against the running stack: reads, auth, role separation
-bash scripts/verify/all.sh                # 92 cases
+bash scripts/verify/all.sh                # 98 cases
 
 # 2. Pure logic — safety checks, formatting, the RBAC matrix, colour contrast
 pnpm --filter @emr/web test -- --run      # 112 cases

@@ -40,7 +40,12 @@ export function useSendReply(conversationId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (input: { body: string; templateName?: string | null }) =>
+    mutationFn: (input: {
+      body?: string;
+      /** An approved template. Sendable whether or not the window is open. */
+      templateId?: string;
+      templateVariables?: Record<string, string>;
+    }) =>
       api.post<Message>(
         `/inbox/conversations/${conversationId}/reply`,
         { ...input, idempotencyKey: idempotencyKey() },
