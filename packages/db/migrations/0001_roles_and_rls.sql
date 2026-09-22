@@ -1,94 +1,13 @@
 -- ============================================================================
--- 0001 — Database roles, extensions, forced RLS, and immutability guarantees
+-- 0001 — Grants, forced RLS, and the immutability guarantees
 --
--- This migration establishes the security substrate the application depends on.
--- It runs as the database superuser / bootstrap role, BEFORE the Drizzle-
--- generated table migrations, except where noted (the FORCE RLS and trigger
--- sections must run AFTER tables exist — see the marker below).
+-- Runs AFTER the generated table DDL, because every statement here inspects or
+-- constrains tables that migration created. Extensions and roles are in
+-- 0000_prelude.sql, which runs before them.
 --
--- Reviewers: sections 1, 2, 5 and 6 are the controls that make cross-tenant
--- leakage and audit tampering structurally impossible rather than merely
--- unlikely. Everything else is supporting detail.
--- ============================================================================
-
--- ----------------------------------------------------------------------------
--- 1. Extensions
--- ----------------------------------------------------------------------------
-
--- Fuzzy patient and drug search (risk R4). Required by the GIN trigram indexes
--- declared on patient.name_normalized and drug_catalogue_item.search_normalized.
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-
--- Accent/diacritic folding, so "Sūrya" and "Surya" collide during dedup search.
-CREATE EXTENSION IF NOT EXISTS unaccent;
-
--- gen_random_uuid() for UUIDv4 primary keys (pgcrypto; also built-in from PG13).
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
--- ----------------------------------------------------------------------------
--- 2. Roles
---
--- THE CENTRAL SECURITY CONTROL: the application never connects as an owner.
---
---   emr_migrator  — owns every object, runs DDL. Used only by CI migrations.
---   emr_app       — the API's connection role. NOBYPASSRLS, no DDL.
---   emr_worker_messaging
---                 — the WhatsApp/SMS dispatch worker. Deliberately has NO
---                   privileges on encounter_internal_note, which is what makes
---                   internal notes structurally undispatchable.
---   emr_readonly  — analytics / read replica. SELECT only, still RLS-bound.
---
--- Because emr_app cannot execute DDL, application code is incapable of running
--- ALTER TABLE ... DISABLE ROW LEVEL SECURITY. The tenant boundary cannot be
--- switched off by a compromised or defective API process.
--- ----------------------------------------------------------------------------
-
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'emr_migrator') THEN
-    CREATE ROLE emr_migrator LOGIN;
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'emr_app') THEN
-    CREATE ROLE emr_app LOGIN NOBYPASSRLS;
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'emr_worker_messaging') THEN
-    CREATE ROLE emr_worker_messaging LOGIN NOBYPASSRLS;
-  END IF;
-
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'emr_readonly') THEN
-    CREATE ROLE emr_readonly LOGIN NOBYPASSRLS;
-  END IF;
-END
-$$;
-
--- Explicitly strip BYPASSRLS even if a role pre-existed with it.
-ALTER ROLE emr_app                NOBYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE;
-ALTER ROLE emr_worker_messaging   NOBYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE;
-ALTER ROLE emr_readonly           NOBYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE;
-
--- No object creation in public; all objects are owned by emr_migrator.
-REVOKE CREATE ON SCHEMA public FROM PUBLIC;
-GRANT  USAGE  ON SCHEMA public TO emr_app, emr_worker_messaging, emr_readonly;
-
--- ----------------------------------------------------------------------------
--- 3. Session GUC defaults
---
--- app.clinic_id and app.user_id are set per-transaction by TenantDb.run().
--- Declaring empty defaults means an unset context yields '' rather than an
--- "unrecognized configuration parameter" error; the RLS predicates use
--- nullif(..., '') so an unset context evaluates to NULL and matches NO rows.
---
--- FAIL-CLOSED: absence of tenant context returns zero rows. There is no code
--- path in which a missing context returns every tenant's data.
--- ----------------------------------------------------------------------------
-
-ALTER DATABASE CURRENT_DATABASE SET app.clinic_id TO '';
-ALTER DATABASE CURRENT_DATABASE SET app.user_id   TO '';
-
--- ============================================================================
--- ==  EVERYTHING BELOW THIS LINE RUNS AFTER THE DRIZZLE TABLE MIGRATIONS    ==
+-- Reviewers: sections 5, 6 and 7 are the controls that make cross-tenant
+-- leakage, audit tampering and internal-note dispatch structurally impossible
+-- rather than merely unlikely. Section 12 proves section 5 actually applied.
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -208,6 +127,11 @@ GRANT SELECT                 ON public.patient                  TO emr_worker_me
 GRANT SELECT, INSERT         ON public.audit_event              TO emr_worker_messaging;
 GRANT SELECT, INSERT, UPDATE ON public.task                     TO emr_worker_messaging;
 
+-- The worker and the reporting role are named in every tenant policy (see
+-- tenantPolicy() in the schema). Granting them privileges without naming them
+-- in a policy left both able to see zero rows: forced RLS denies by default,
+-- and a policy only applies to the roles it lists.
+
 REVOKE ALL ON public.encounter_internal_note FROM emr_worker_messaging;
 REVOKE ALL ON public.encounter              FROM emr_worker_messaging;
 
@@ -229,14 +153,15 @@ LANGUAGE plpgsql
 AS $$
 BEGIN
   IF OLD.is_finalized THEN
-    IF NEW.chief_complaint            IS DISTINCT FROM OLD.chief_complaint
-    OR NEW.history_of_present_illness IS DISTINCT FROM OLD.history_of_present_illness
-    OR NEW.examination_notes          IS DISTINCT FROM OLD.examination_notes
-    OR NEW.assessment_notes           IS DISTINCT FROM OLD.assessment_notes
-    OR NEW.plan_notes                 IS DISTINCT FROM OLD.plan_notes
-    OR NEW.patient_id                 IS DISTINCT FROM OLD.patient_id
-    OR NEW.practitioner_id            IS DISTINCT FROM OLD.practitioner_id
-    OR NEW.is_finalized               IS DISTINCT FROM OLD.is_finalized
+    -- WHITELIST, not a blacklist. Naming the immutable columns meant every
+    -- column added later was silently mutable: follow_up_instructions (which
+    -- is printed on the prescription), finalized_by and finalized_at (the
+    -- attribution on a legal document) and status were all editable after
+    -- signing. Listing the few operational columns that MAY change is the only
+    -- form of this rule that survives a schema change.
+    IF (to_jsonb(NEW) - 'updated_at' - 'updated_by' - 'version')
+       IS DISTINCT FROM
+       (to_jsonb(OLD) - 'updated_at' - 'updated_by' - 'version')
     THEN
       RAISE EXCEPTION
         'encounter % is finalised; clinical content is immutable. Create an amendment instead.',
@@ -264,11 +189,24 @@ BEGIN
   SELECT is_finalized INTO parent_finalized
   FROM public.encounter WHERE id = OLD.encounter_id;
 
-  IF parent_finalized AND NEW.status IS NOT DISTINCT FROM OLD.status THEN
-    RAISE EXCEPTION
-      'medication_request % belongs to a finalised encounter; issue a new prescription instead.',
-      OLD.id
-      USING ERRCODE = 'integrity_constraint_violation';
+  IF parent_finalized THEN
+    -- The previous version rejected an edit only when `status` was UNCHANGED,
+    -- which inverted the intent: changing the status let any other column ride
+    -- along, so a signed prescription could have its drug name, strength or
+    -- dosage rewritten. A dispensed prescription that can be silently edited
+    -- afterwards is a fraud and liability vector.
+    --
+    -- Status transitions ARE legitimate — a drug is stopped or completed — so
+    -- status, and only status, may move. Everything else is frozen.
+    IF (to_jsonb(NEW) - 'status' - 'updated_at' - 'updated_by' - 'version')
+       IS DISTINCT FROM
+       (to_jsonb(OLD) - 'status' - 'updated_at' - 'updated_by' - 'version')
+    THEN
+      RAISE EXCEPTION
+        'medication_request % belongs to a finalised encounter; only its status may change. Issue a new prescription instead.',
+        OLD.id
+        USING ERRCODE = 'integrity_constraint_violation';
+    END IF;
   END IF;
   RETURN NEW;
 END

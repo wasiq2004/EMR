@@ -426,12 +426,18 @@ export const drugCatalogueItem = pgTable(
   },
   (t) => [
     foreignKey({ columns: [t.clinicId], foreignColumns: [clinic.id] }).onDelete('restrict'),
-    /** Drug search must return in <200ms while the doctor types. */
-    index('drug_catalogue_search_trgm_idx')
-      .using('gin', t.searchNormalized.op('gin_trgm_ops'))
-      .concurrently(),
+    /*
+     * Drug search runs while the doctor types, several times per prescription,
+     * so it has to return in well under 200ms. Leads with clinic_id for the
+     * same reason every other index does — see the patient name index.
+     */
+    index('drug_catalogue_search_trgm_idx').using(
+      'gin',
+      t.clinicId.op('uuid_ops'),
+      t.searchNormalized.op('gin_trgm_ops'),
+    ),
     index('drug_catalogue_clinic_molecule_idx').on(t.clinicId, t.moleculeName),
-    sharedReferencePolicy('drug_catalogue_item'),
+    ...sharedReferencePolicy('drug_catalogue_item'),
   ],
 ).enableRLS();
 

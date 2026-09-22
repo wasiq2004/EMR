@@ -28,6 +28,7 @@ import { PractitionerCredentialCache } from './practitioner-credential.cache';
 
 export const PERMISSION_KEY = 'rbac:permission';
 export const PUBLIC_KEY = 'rbac:public';
+export const AUTHENTICATED_KEY = 'rbac:authenticated';
 
 /**
  * Declares the permission a route requires.
@@ -45,6 +46,18 @@ export const RequirePermission = (permission: Permission) =>
  * public share-link resolver, and health checks.
  */
 export const Public = () => SetMetadata(PUBLIC_KEY, true);
+
+/**
+ * Marks a route that requires a session but no particular permission.
+ *
+ * A small, closed set: reading your own session, signing out, and the routes
+ * that every role needs regardless of what it may do. These are not @Public —
+ * an anonymous caller is still refused — and inventing a permission like
+ * `session:read` that is granted to every role would add a row to the
+ * permission matrix that can only ever say yes, which makes the matrix harder
+ * to audit rather than easier.
+ */
+export const Authenticated = () => SetMetadata(AUTHENTICATED_KEY, true);
 
 @Injectable()
 export class RbacGuard implements CanActivate {
@@ -67,6 +80,18 @@ export class RbacGuard implements CanActivate {
       PERMISSION_KEY,
       [handler, controller],
     );
+
+    const authenticatedOnly = this.reflector.getAllAndOverride<boolean>(
+      AUTHENTICATED_KEY,
+      [handler, controller],
+    );
+
+    if (authenticatedOnly && !required) {
+      if (!TenantContext.get()) {
+        throw new UnauthorizedException('Authentication required.');
+      }
+      return true;
+    }
 
     /**
      * DENY BY DEFAULT. An undeclared route is a developer oversight, and the

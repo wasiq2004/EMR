@@ -20,7 +20,7 @@
  */
 
 import { ForbiddenException, Inject, Injectable, Logger } from '@nestjs/common';
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
 import * as schema from '@emr/db/schema';
@@ -103,21 +103,48 @@ export class TenantDb {
   }
 
   /**
-   * Escape hatch for platform operations that legitimately span tenants:
-   * provisioning a new clinic, nightly cross-tenant maintenance, the tenancy
-   * verification job.
+   * A transaction for a tenant that is known but is not yet in context.
    *
-   * Runs as `emr_migrator`, which BYPASSES RLS. Every call site must be listed
-   * in the security review checklist and is asserted by a CI test that fails if
-   * the count of call sites changes without a corresponding checklist update.
+   * Sign-in, refresh and share-link redemption all reach a point where the
+   * clinic HAS been established — by a verified password, a stored token hash,
+   * an unguessable link — but no context exists yet because establishing it was
+   * the job. This runs their remaining work fully scoped, under exactly the same
+   * RLS as everything else.
    *
-   * NEVER reachable from an HTTP request handler.
+   * `clinicId` must come from one of the resolvers in
+   * `0002_pre_tenant_resolvers.sql` or from a verified credential. It must never
+   * come from the request body, a path parameter or a header.
    */
-  async runUnscopedPlatformOperation<T>(
-    reason: string,
-    work: (db: Db) => Promise<T>,
+  async runAs<T>(
+    clinicId: string,
+    userId: string | null,
+    work: (tx: TenantTx) => Promise<T>,
   ): Promise<T> {
-    this.logger.warn(`UNSCOPED platform operation: ${reason}`);
-    return work(this.db);
+    return this.db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT set_config('app.clinic_id', ${clinicId}, true)`);
+      await tx.execute(sql`SELECT set_config('app.user_id', ${userId ?? ''}, true)`);
+
+      return work(tx);
+    });
+  }
+
+  /**
+   * Calls one of the three pre-tenant resolvers.
+   *
+   * These are SECURITY DEFINER functions, enumerated and justified in
+   * `0002_pre_tenant_resolvers.sql`. Each answers one question and returns
+   * identifiers only. This method exists so that every tenant-boundary crossing
+   * in the application is one grep away, and so that its narrowness is a
+   * property of the database rather than a promise made in a comment.
+   *
+   * It deliberately offers no way to run arbitrary SQL.
+   */
+  async resolveAcrossTenants<T extends Record<string, unknown>>(
+    reason: string,
+    query: SQL,
+  ): Promise<T[]> {
+    this.logger.log(`Pre-tenant resolution: ${reason}`);
+    const result = await this.db.execute(query);
+    return result.rows as T[];
   }
 }

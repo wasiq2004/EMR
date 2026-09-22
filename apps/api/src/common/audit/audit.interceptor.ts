@@ -169,7 +169,7 @@ export class AuditInterceptor implements NestInterceptor {
 
   /** First path segment after the version prefix, e.g. /v1/patients/:id → "patients". */
   private routeKey(req: FastifyRequest): string {
-    return req.url.split('?')[0].split('/').filter(Boolean)[1] ?? 'unknown';
+    return req.url.split('?')[0]?.split('/').filter(Boolean)[1] ?? 'unknown';
   }
 
   private extractResourceId(req: FastifyRequest): string | null {

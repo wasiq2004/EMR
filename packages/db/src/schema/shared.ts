@@ -31,6 +31,28 @@ import {
 export const emrApp = pgRole('emr_app').existing();
 
 /**
+ * The WhatsApp/SMS dispatch worker. It holds no privilege at all on
+ * `encounter_internal_note`, which is what makes an internal note structurally
+ * undispatchable. It still needs a tenant policy on the tables it CAN reach —
+ * an RLS policy is scoped to the roles it names, so a role with no applicable
+ * policy sees zero rows no matter what it has been granted.
+ */
+export const emrWorkerMessaging = pgRole('emr_worker_messaging').existing();
+
+/** Analytics and the read replica. SELECT only, and still tenant-bound. */
+export const emrReadonly = pgRole('emr_readonly').existing();
+
+/**
+ * Every role that reaches a tenant table through the application.
+ *
+ * Policies name all of them and grants decide what each may do. Naming only
+ * `emr_app` left the worker and the reporting role able to see nothing at all:
+ * their grants were real, but with no policy applying to them, forced RLS
+ * returned zero rows.
+ */
+export const tenantRoles = [emrApp, emrWorkerMessaging, emrReadonly];
+
+/**
  * Reserved tenant that owns globally shared reference data (drug catalogue, ICD
  * code sets). Real clinics can READ rows owned by this tenant but can never
  * write to it — see `sharedReferencePolicy()`.
@@ -355,29 +377,60 @@ export const tenantPolicy = (tableName: string) =>
   pgPolicy(`${tableName}_tenant_isolation`, {
     as: 'permissive',
     for: 'all',
-    to: emrApp,
+    to: tenantRoles,
     using: sql`clinic_id = nullif(current_setting('app.clinic_id', true), '')::uuid`,
     withCheck: sql`clinic_id = nullif(current_setting('app.clinic_id', true), '')::uuid`,
   });
 
 /**
- * Policy for globally shared reference data (drug catalogue, code systems).
+ * Policy set for globally shared reference data (the drug catalogue).
  *
- * READ: the clinic's own rows plus the SYSTEM tenant's rows.
- * WRITE: the clinic's own rows only — a clinic can add a custom formulation but
- * can never modify the shared catalogue that every other clinic prescribes from.
+ * READ widens to the system tenant; WRITE does not. This is deliberately FOUR
+ * policies rather than one `FOR ALL`, and the reason is a real hole that one
+ * policy left open:
+ *
+ *   - `USING` decides which rows a DELETE may remove, and `WITH CHECK` never
+ *     applies to DELETE at all. A single `FOR ALL` policy whose `USING`
+ *     included the system tenant therefore let ANY clinic delete the shared
+ *     catalogue every other clinic prescribes from.
+ *   - `USING` also decides which rows an UPDATE may touch, so the same policy
+ *     let a clinic re-parent a shared row onto itself, removing it for
+ *     everyone.
+ *
+ * Splitting them means the widened `USING` applies to reads only. Writes are
+ * confined to the clinic's own rows, so a clinic can add a compounded
+ * preparation and can never touch the shared list.
  */
-export const sharedReferencePolicy = (tableName: string) =>
-  pgPolicy(`${tableName}_tenant_isolation`, {
+export const sharedReferencePolicy = (tableName: string) => [
+  pgPolicy(`${tableName}_shared_read`, {
     as: 'permissive',
-    for: 'all',
-    to: emrApp,
+    for: 'select',
+    to: tenantRoles,
     using: sql`clinic_id IN (
       nullif(current_setting('app.clinic_id', true), '')::uuid,
       '${sql.raw(SYSTEM_CLINIC_ID)}'::uuid
     )`,
+  }),
+  pgPolicy(`${tableName}_own_insert`, {
+    as: 'permissive',
+    for: 'insert',
+    to: tenantRoles,
     withCheck: sql`clinic_id = nullif(current_setting('app.clinic_id', true), '')::uuid`,
-  });
+  }),
+  pgPolicy(`${tableName}_own_update`, {
+    as: 'permissive',
+    for: 'update',
+    to: tenantRoles,
+    using: sql`clinic_id = nullif(current_setting('app.clinic_id', true), '')::uuid`,
+    withCheck: sql`clinic_id = nullif(current_setting('app.clinic_id', true), '')::uuid`,
+  }),
+  pgPolicy(`${tableName}_own_delete`, {
+    as: 'permissive',
+    for: 'delete',
+    to: tenantRoles,
+    using: sql`clinic_id = nullif(current_setting('app.clinic_id', true), '')::uuid`,
+  }),
+];
 
 /**
  * Policy for the audit log: readable and insertable within the tenant, never
@@ -390,13 +443,13 @@ export const appendOnlyTenantPolicies = (tableName: string) => [
   pgPolicy(`${tableName}_tenant_read`, {
     as: 'permissive',
     for: 'select',
-    to: emrApp,
+    to: tenantRoles,
     using: sql`clinic_id = nullif(current_setting('app.clinic_id', true), '')::uuid`,
   }),
   pgPolicy(`${tableName}_tenant_append`, {
     as: 'permissive',
     for: 'insert',
-    to: emrApp,
+    to: tenantRoles,
     withCheck: sql`clinic_id = nullif(current_setting('app.clinic_id', true), '')::uuid`,
   }),
 ];

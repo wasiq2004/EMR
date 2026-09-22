@@ -8,13 +8,28 @@
     "node": ">=24"
   },
   "scripts": {
-    "dev": "pnpm --filter @emr/web dev",
-    "build": "pnpm --filter @emr/web build",
+    "dev": "pnpm --parallel --filter @emr/web --filter @emr/api dev",
+    "build": "pnpm -r build",
     "start": "pnpm --filter @emr/web start",
     "lint": "pnpm -r lint",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "dev:web": "pnpm --filter @emr/web dev",
+    "dev:api": "pnpm --filter @emr/api dev",
+    "test": "pnpm -r test",
+    "db:generate": "pnpm --filter @emr/db generate",
+    "db:migrate": "pnpm --filter @emr/api migrate",
+    "db:seed": "pnpm --filter @emr/api seed"
   },
   "devDependencies": {
     "typescript": "^5.9.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "argon2",
+      "esbuild",
+      "@tailwindcss/oxide",
+      "sharp",
+      "unrs-resolver"
+    ]
   }
 }

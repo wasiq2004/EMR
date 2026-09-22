@@ -1,0 +1,20 @@
+# Never copy these into a build context.
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+**/dist
+.git
+.github
+test-results
+playwright-report
+**/test-results
+**/playwright-report
+*.log
+.env
+.env.*
+!.env.example
+docs
+*.pdf
+TODO.md

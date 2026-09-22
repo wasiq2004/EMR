@@ -158,10 +158,24 @@ export const patient = pgTable(
       .on(t.clinicId, t.mobileE164)
       .where(sql`mobile_e164 IS NOT NULL`),
 
-    /** Fuzzy name search. GIN + gin_trgm_ops; created in migration 0001. */
-    index('patient_clinic_name_trgm_idx')
-      .using('gin', t.nameNormalized.op('gin_trgm_ops'))
-      .concurrently(),
+    /*
+     * Fuzzy name search.
+     *
+     * Leads with clinic_id via btree_gin. Every index must: the RLS predicate
+     * filters on clinic_id on every query, so an index that does not lead with
+     * it cannot serve the filter and the planner falls back to a scan that RLS
+     * then discards. An RLS-protected table with non-tenant-leading indexes
+     * performs catastrophically, and the symptom only appears once a second
+     * tenant exists.
+     *
+     * Not CONCURRENTLY: a migration runs inside a transaction, and
+     * CREATE INDEX CONCURRENTLY cannot. It is also pointless on an empty table.
+     */
+    index('patient_clinic_name_trgm_idx').using(
+      'gin',
+      t.clinicId.op('uuid_ops'),
+      t.nameNormalized.op('gin_trgm_ops'),
+    ),
 
     index('patient_clinic_created_idx').on(t.clinicId, t.createdAt.desc()),
     index('patient_clinic_active_idx')

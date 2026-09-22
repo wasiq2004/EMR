@@ -1,7 +1,13 @@
+import path from 'node:path';
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+
+  // Self-contained server for the container: Next traces the modules the app
+  // actually imports, so the runtime image carries a fraction of node_modules.
+  output: 'standalone',
+  outputFileTracingRoot: path.join(import.meta.dirname, '../..'),
 
   // Zod schemas are shared as source, so Next must compile the workspace package.
   transpilePackages: ['@emr/contracts'],

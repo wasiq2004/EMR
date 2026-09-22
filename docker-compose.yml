@@ -1,0 +1,165 @@
+# Clinic EMR — the whole stack.
+#
+#   docker compose up --build
+#
+# Brings up Postgres, Redis, the API and the web app, runs migrations and seeds
+# the acceptance fixtures, then opens on http://localhost:3000.
+#
+# Start order is enforced by health checks, not by sleeps: the API waits for
+# Postgres to answer queries, the migration job waits for the API's database,
+# and the web app waits for the API to report ready. A stack that races its own
+# dependencies fails intermittently, which is the worst way for it to fail.
+
+name: emr
+
+services:
+  # ---------------------------------------------------------------------------
+  # Database
+  #
+  # The application connects as emr_app, a role created by the migration with
+  # NOBYPASSRLS and no DDL rights. The superuser credentials below are used by
+  # the migration runner only.
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-emr_migrator}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-emr_migrator}
+      POSTGRES_DB: ${POSTGRES_DB:-emr}
+      # Deterministic collation, so name ordering does not depend on the host.
+      POSTGRES_INITDB_ARGS: '--locale-provider=icu --icu-locale=en-IN --encoding=UTF8'
+    ports:
+      - '${POSTGRES_PORT:-5433}:5432'
+    volumes:
+      # Postgres 18 wants a single mount at /var/lib/postgresql, not at
+      # .../data. Mounting the data directory directly puts the version file
+      # outside the volume, and the server refuses to start rather than risk
+      # opening a cluster it cannot verify.
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      # -U matters: without it pg_isready checks for a role named "root".
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-emr_migrator} -d ${POSTGRES_DB:-emr}']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # Redis — background job queues and the session revocation set
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '${REDIS_PORT:-6380}:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ---------------------------------------------------------------------------
+  # Migrations and seed
+  #
+  # A one-shot job rather than an API startup step. Migrations need the owner
+  # role; the API must never hold it. Running them separately is also what lets
+  # the API scale to more than one task without them racing.
+  # ---------------------------------------------------------------------------
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: runner
+    restart: 'no'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://${POSTGRES_USER:-emr_migrator}:${POSTGRES_PASSWORD:-emr_migrator}@postgres:5432/${POSTGRES_DB:-emr}
+      MIGRATION_DATABASE_URL: postgres://${POSTGRES_USER:-emr_migrator}:${POSTGRES_PASSWORD:-emr_migrator}@postgres:5432/${POSTGRES_DB:-emr}
+      JWT_SECRET: ${JWT_SECRET:-development-only-not-a-secret-key}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+    command: ['sh', '-c', 'node dist/database/migrate.js && node dist/database/seed.js']
+
+  # ---------------------------------------------------------------------------
+  # API
+  #
+  # Connects as emr_app. Never holds the owner role, so it is structurally
+  # incapable of disabling a tenant policy.
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: runner
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgres://emr_app:emr_app@postgres:5432/${POSTGRES_DB:-emr}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-development-only-not-a-secret-key}
+      STORAGE_DRIVER: local
+      STORAGE_LOCAL_PATH: /var/lib/emr/objects
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      MFA_GRACE_DAYS: ${MFA_GRACE_DAYS:-7}
+    volumes:
+      - object-storage:/var/lib/emr/objects
+    ports:
+      - '${API_PORT:-4000}:4000'
+    healthcheck:
+      # readyz proves Postgres answers. An API that cannot reach the database
+      # can serve nothing useful, so it should not be marked healthy.
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:4000/v1/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # Web
+  #
+  # Renders the UI and proxies to the API. It holds no database connection and
+  # evaluates no permissions — both live behind the API's global guards.
+  # ---------------------------------------------------------------------------
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: runner
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # Server-side only. The browser never addresses the API directly, which
+      # is what allows the API to sit on a private network.
+      API_BASE_URL: http://api:4000
+    ports:
+      - '${WEB_PORT:-3000}:3000'
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+volumes:
+  postgres-data:
+  redis-data:
+  object-storage:

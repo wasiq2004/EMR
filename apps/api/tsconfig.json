@@ -1,0 +1,26 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "verbatimModuleSyntax": false,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "target": "ES2023",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "baseUrl": ".",
+    "noEmit": false,
+    "declaration": false,
+    "declarationMap": false,
+    "types": ["node"],
+    "paths": {
+      "@/*": ["./src/*"],
+      "@emr/db/schema": ["../../packages/db/dist/schema/index.d.ts"],
+      "@emr/db": ["../../packages/db/dist/index.d.ts"],
+      "@emr/contracts": ["../../packages/contracts/dist/index.d.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}
