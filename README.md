@@ -195,6 +195,24 @@ before the doctor commits, not after.
 
 ---
 
+## Appearance
+
+Light and dark, switchable from the header or Settings → My account. Three
+states, not two: **System** follows the machine and is the default, **Light** and
+**Dark** override it.
+
+The third state matters on a clinic desktop that dims itself in the evening — on
+System the app follows without a reload. The choice lives in `localStorage`, so
+it is per browser and never reaches the server: the reason to want dark mode is
+usually the room, not the person.
+
+Dark is a separate palette rather than an inversion, and `theme.test.ts` measures
+every foreground/background pair in both themes against WCAG 2.2 AA
+programmatically — a dark mode nobody has measured is how the one warning that
+matters ends up at 1.4:1.
+
+---
+
 ## Ports
 
 Deliberately not 5432 or 6379, so this stack cannot collide with a Postgres or

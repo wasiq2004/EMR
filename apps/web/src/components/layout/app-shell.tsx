@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { LogOut, Menu, Settings, UserRound, X } from 'lucide-react';
 import { ROLE_LABEL } from '@emr/contracts';
+import { ThemeSwitcher } from './theme-switcher';
 import { api } from '@/lib/api-client';
 import { useSession } from '@/lib/session';
 import { initials } from '@/lib/format';
@@ -95,6 +96,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Omnibox />
 
           <div className="ml-auto flex items-center gap-1">
+            {/*
+              Hidden below sm. On a phone the header has room for the search box
+              and roughly one more thing, and that thing is not a colour
+              preference — the same control is on Settings → My account.
+            */}
+            <ThemeSwitcher className="mr-1 hidden sm:flex" />
+
             <Button size="icon" variant="ghost" asChild>
               <Link href="/settings/account" aria-label="My account">
                 <Settings aria-hidden />

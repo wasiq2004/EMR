@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Field, Input } from '@/components/ui/field';
 import { DataList, Panel, PanelBody, PanelHeader } from '@/components/ui/surface';
+import { ThemeSwitcher } from '@/components/layout/theme-switcher';
 import { Alert } from '@/components/ui/feedback';
 import { useToast } from '@/components/ui/toast';
 
@@ -50,6 +51,19 @@ export default function AccountSettingsPage() {
               },
             ]}
           />
+        </PanelBody>
+      </Panel>
+
+      <Panel>
+        <PanelHeader
+          title="Appearance"
+          description="Applies to this browser only, and is not shared with your clinic."
+        />
+        <PanelBody className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-ink-soft">
+            Match the system theme, or pick one.
+          </p>
+          <ThemeSwitcher />
         </PanelBody>
       </Panel>
 

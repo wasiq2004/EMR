@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Atkinson_Hyperlegible, IBM_Plex_Mono } from 'next/font/google';
 import './globals.css';
+import { THEME_INIT_SCRIPT, ThemeProvider } from '@/lib/theme';
 
 /**
  * Atkinson Hyperlegible is chosen for letterform disambiguation, not style:
@@ -49,7 +50,19 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en-IN" className={`${sans.variable} ${mono.variable}`}>
+    <html lang="en-IN" className={`${sans.variable} ${mono.variable}`} suppressHydrationWarning>
+      <head>
+        {/*
+          Blocking, and before anything paints. It reads the saved theme and
+          stamps data-theme on <html> so the correct palette is in force for the
+          FIRST frame. Without it, anyone who chose dark gets a white flash on
+          every navigation — which is worse than having no switcher at all.
+
+          suppressHydrationWarning on <html> because this script legitimately
+          mutates the element before React sees it.
+        */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="min-h-dvh antialiased">
         <a
           href="#main"
@@ -57,7 +70,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         >
           Skip to main content
         </a>
-        {children}
+        <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>
   );
