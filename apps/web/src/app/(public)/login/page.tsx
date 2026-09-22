@@ -12,6 +12,15 @@ import { Field, Input } from '@/components/ui/field';
 import { Alert } from '@/components/ui/feedback';
 
 /**
+ * The seeded demo password.
+ *
+ * One constant, used by the prefilled form and by the role buttons below, so
+ * the two cannot disagree — which they did: the buttons posted `demo` long
+ * after the seed moved to this value, and every one of them silently failed.
+ */
+const DEMO_PASSWORD = 'demo1234';
+
+/**
  * Sign in.
  *
  * The tenant is resolved from the clinic's own subdomain, not from anything the
@@ -35,7 +44,7 @@ export default function LoginPage() {
 
   const form = useForm({
     resolver: zodResolver(LoginInput),
-    defaultValues: { email: 'priya.k@sunriseclinic.in', password: 'demo' },
+    defaultValues: { email: 'priya.k@sunriseclinic.in', password: DEMO_PASSWORD },
   });
 
   const onSubmit = form.handleSubmit(async (values) => {
@@ -111,9 +120,9 @@ export default function LoginPage() {
             Sign in
           </Button>
 
-          <p className="text-2xs text-ink-faint">
-            Forgotten your password? A clinic administrator can reset it for you from
-            Staff and roles.
+          <p className="text-xs leading-relaxed text-ink-soft">
+            Forgotten your password? A clinic administrator can reset it for you
+            from Staff and roles.
           </p>
         </form>
 
@@ -147,7 +156,7 @@ function DemoRolePicker() {
   };
 
   const signInAs = async (role: UserRole) => {
-    await api.post('/auth/login', { email: emails[role], password: 'demo' });
+    await api.post('/auth/login', { email: emails[role], password: DEMO_PASSWORD });
     router.push(role === 'AUDITOR' ? '/audit' : '/today');
     router.refresh();
   };
@@ -157,8 +166,21 @@ function DemoRolePicker() {
       <p className="text-2xs font-semibold uppercase tracking-wide text-ink-faint">
         Demo · open a panel
       </p>
-      <p className="mt-1 text-2xs text-ink-faint">
-        Sample data only. Not part of the production sign-in.
+      <p className="mt-1 text-xs leading-relaxed text-ink-soft">
+        Sample data only, signing in with the password{' '}
+        {/*
+          The full stop lives INSIDE the span with the code element. Putting it
+          on the next JSX line makes JSX insert a space before it, and a
+          floating full stop is the kind of small wrongness that reads as
+          sloppy without the reader being able to say why.
+        */}
+        <span className="whitespace-nowrap">
+          <code className="rounded-xs bg-surface-sunk px-1 py-0.5 font-mono">
+            {DEMO_PASSWORD}
+          </code>
+          .
+        </span>{' '}
+        Not part of the production sign-in.
       </p>
       <div className="mt-2 flex flex-wrap gap-1.5">
         {roles.map((role) => (

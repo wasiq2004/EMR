@@ -75,9 +75,10 @@ Checkpoint (build + typecheck + test + commit) after every 5 tasks.
 - [x] 22. `docker-compose.yml` wired end to end with env and health gates
 - [x] 23. Migrate and seed inside the container, verify the stack live
 - [x] 24. Browser tests against the real backend
-- [ ] 25. UI polish pass
+- [x] 25. UI polish pass
 
-> **CHECKPOINT 5** — full stack verified in Docker
+> **CHECKPOINT 5 — CLEARED.** Full stack in Docker, all four services healthy,
+> 69 API cases + 111 web unit tests + 7 browser tests green against it.
 
 ## Stage 6 — Handover
 

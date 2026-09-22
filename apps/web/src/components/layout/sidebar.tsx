@@ -4,7 +4,6 @@ import * as React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Stethoscope } from 'lucide-react';
-import { ROLE_LABEL } from '@emr/contracts';
 import { navigationFor, PANEL_FOR_ROLE, PANEL_LABEL } from '@/lib/nav';
 import { useSession } from '@/lib/session';
 import { cn } from '@/lib/cn';
@@ -43,8 +42,13 @@ export function Sidebar({
           <p className="truncate text-sm font-semibold text-ink">
             {session.clinicName}
           </p>
-          <p className="truncate text-2xs text-ink-faint">
-            {PANEL_LABEL[panel]} · {ROLE_LABEL[session.role]}
+          {/*
+            The panel, not the role. The role is shown beside the user's name in
+            the top bar, where it belongs — it describes the person, not the
+            workspace. Printing both here produced "Doctor · Doctor".
+          */}
+          <p className="truncate text-2xs font-medium uppercase tracking-wide text-ink-faint">
+            {PANEL_LABEL[panel]}
           </p>
         </div>
       </div>

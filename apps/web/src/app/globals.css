@@ -109,9 +109,35 @@
   --radius-md: 6px;
   --radius-lg: 10px;
 
-  --shadow-raise: 0 1px 2px rgb(16 32 42 / 0.06), 0 1px 3px rgb(16 32 42 / 0.04);
-  --shadow-pop: 0 4px 12px rgb(16 32 42 / 0.1), 0 2px 4px rgb(16 32 42 / 0.06);
-  --shadow-modal: 0 16px 48px rgb(16 32 42 / 0.22);
+  /*
+   * Elevation.
+   *
+   * Three steps and no more, each a contact shadow plus a diffuse one. The
+   * contact shadow is what the eye actually reads as "this sits above that";
+   * a single diffuse blur reads as a grey smudge, which is why the previous
+   * one-layer values looked flat against the canvas rather than raised.
+   *
+   * Tinted with the ink hue rather than pure black. A neutral-black shadow over
+   * a cool grey canvas goes slightly muddy, and on a screen full of white cards
+   * that muddiness is most of the difference between "clean" and "cheap".
+   */
+  --shadow-raise:
+    0 1px 1px rgb(16 32 42 / 0.05),
+    0 2px 6px -1px rgb(16 32 42 / 0.06);
+  --shadow-pop:
+    0 1px 2px rgb(16 32 42 / 0.06),
+    0 8px 20px -4px rgb(16 32 42 / 0.12);
+  --shadow-modal:
+    0 2px 4px rgb(16 32 42 / 0.08),
+    0 24px 56px -12px rgb(16 32 42 / 0.28);
+
+  /*
+   * One motion token, used everywhere something changes under the pointer.
+   * 120ms is below the threshold where a hover feels like it lags and above the
+   * one where it reads as a jump.
+   */
+  --ease-ui: cubic-bezier(0.32, 0.72, 0, 1);
+  --duration-ui: 120ms;
 }
 
 /* Dark theme. Clinics run late; a night shift should not be a white flash. */

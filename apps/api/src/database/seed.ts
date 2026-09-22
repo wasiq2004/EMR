@@ -254,8 +254,13 @@ async function seedDemoClinic(db: Database) {
     ['MRN-000119', 'Ramesh Kumar', 'MALE', '+919876543210', '1988-07-02', null, null, []],
     ['MRN-000120', 'Aarav Kumar', 'MALE', '+919876543210', '2020-01-22', null, null, ['Paediatric']],
     // The safety trap.
+    // The clinical alert says something the structured allergy record CANNOT.
+    // Repeating "severe penicillin allergy" here would put the same sentence
+    // twice on one screen, and two identical warnings train the eye to skip
+    // both — which costs exactly the attention the allergy panel needs.
     ['MRN-000042', 'Lakshmi Narayanan', 'FEMALE', '+919845512300', '1974-06-09', null,
-     'Severe penicillin allergy — confirm before any antibiotic', ['Chronic care']],
+     'Hard of hearing — speak facing her. Son Karthik usually interprets.',
+     ['Chronic care']],
     // Transliteration: same date of birth, different numbers.
     ['MRN-000201', 'Mohd Imran', 'MALE', '+919922334455', '1985-11-30', null, null, []],
     ['MRN-000276', 'Mohammed Imran', 'MALE', '+919922998877', '1985-11-30', null, null, []],

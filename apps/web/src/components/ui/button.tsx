@@ -16,20 +16,26 @@ import { cn } from '@/lib/cn';
  */
 const button = cva(
   'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium ' +
-    'transition-colors select-none ' +
+    // Colour AND shadow, on the shared motion token. A button whose fill moves
+    // while its shadow snaps is the small wrongness that reads as unfinished.
+    'transition-[color,background-color,border-color,box-shadow] duration-[--duration-ui] ease-[--ease-ui] ' +
+    'select-none ' +
+    // Pressed state. 1px is enough to feel like the control took the press;
+    // anything more moves the label and reads as a glitch.
+    'active:translate-y-px ' +
     'disabled:pointer-events-none disabled:opacity-50 ' +
     '[&_svg]:pointer-events-none [&_svg]:shrink-0',
   {
     variants: {
       variant: {
         primary:
-          'bg-accent text-accent-contrast hover:bg-accent-hover shadow-raise',
+          'bg-accent text-accent-contrast hover:bg-accent-hover shadow-raise hover:shadow-pop',
         secondary:
-          'bg-surface text-ink border border-line hover:bg-surface-sunk shadow-raise',
+          'bg-surface text-ink border border-line hover:bg-surface-sunk hover:border-line-strong shadow-raise',
         ghost: 'text-ink-soft hover:bg-surface-sunk hover:text-ink',
         /** Destructive and irreversible. Used for finalise, revoke, delete. */
         critical:
-          'bg-critical text-critical-contrast hover:opacity-90 shadow-raise',
+          'bg-critical text-critical-contrast hover:opacity-90 shadow-raise hover:shadow-pop',
         /** Reads as a link but behaves as a button. */
         link: 'text-accent underline-offset-4 hover:underline',
       },
