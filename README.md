@@ -67,10 +67,10 @@ Three suites, each testing something the others cannot.
 
 ```bash
 # 1. The API, against the running stack: reads, auth, role separation
-bash scripts/verify/all.sh                # 69 cases
+bash scripts/verify/all.sh                # 77 cases
 
 # 2. Pure logic — safety checks, formatting, the RBAC matrix, colour contrast
-pnpm --filter @emr/web test -- --run      # 111 cases
+pnpm --filter @emr/web test -- --run      # 112 cases
 
 # 3. Every screen, every role, in a real browser
 cd apps/web && npx playwright test        # 7 walks
