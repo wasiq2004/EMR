@@ -32,19 +32,23 @@ CRM. Checkpoint after every five.
 
 ## Stage 2 — The live inbox
 
-- [ ] 6. SSE hub on the API: tenant-scoped, Redis fan-out for multi-replica
-- [ ] 7. `GET /events` endpoint + BFF streaming passthrough
-- [ ] 8. `useServerEvents` — one shared stream, backoff, give-up
-- [ ] 9. Conversation list: search, unread, assignment, unlinked
-- [ ] 10. Chat window: bubbles, monotonic status ticks, optimistic send
+- [x] 6. SSE hub on the API: tenant-scoped, Redis fan-out for multi-replica
+- [x] 7. `GET /events` endpoint + BFF streaming passthrough
+- [x] 8. `useServerEvents` — one shared stream, backoff, give-up
+- [x] 9. Conversation list: search, unread, assignment, unlinked
+- [x] 10. Chat window: bubbles, monotonic status ticks, optimistic send
 
-> **CHECKPOINT 2** — two browsers, one conversation, messages appear live
+> **CHECKPOINT 2 — CLEARED.** Two browsers, two sessions, one conversation: a
+> reply typed by reception appeared in the doctor's window with no reload, and
+> no console errors in either.
 
-- [ ] 11. The 24-hour window: countdown, composer lock, template re-engagement
-- [ ] 12. Patient context panel + link an unlinked conversation
-- [ ] 13. Mark-read on open, unread badges live
+- [x] 11. The 24-hour window: countdown, composer lock, template re-engagement
+- [x] 12. Patient context panel + link an unlinked conversation
+- [x] 13. Mark-read on open, unread badges live
 
-> **CHECKPOINT 3** — the inbox behaves like a chat client
+> **CHECKPOINT 3 — CLEARED.** Three panes, live countdown, composer that locks
+> outside the window, optimistic send, day dividers, monotonic status ticks and
+> a patient context panel carrying the allergy.
 
 ## Stage 3 — Broadcast
 

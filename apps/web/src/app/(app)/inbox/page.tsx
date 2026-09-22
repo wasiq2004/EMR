@@ -1,117 +1,171 @@
 'use client';
 
 import * as React from 'react';
-import Link from 'next/link';
-import { Inbox, Link2Off, MessageSquare } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { MessageSquare } from 'lucide-react';
+import type {
+  CommunicationStatus,
+  Conversation,
+  WhatsappTemplate,
+} from '@emr/contracts';
+import { api } from '@/lib/api-client';
+import { qk } from '@/lib/query-client';
+import { useServerEvents, useStreamStatus, type ServerEvent } from '@/lib/server-events';
+import { EmptyState } from '@/components/ui/feedback';
 import { useConversations } from '@/features/inbox/api';
-import { isWindowOpen } from '@emr/contracts';
-import { formatPhone, relativeTime } from '@/lib/format';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Panel, PanelHeader, PageHeader } from '@/components/ui/surface';
-import { EmptyState, SkeletonRows } from '@/components/ui/feedback';
+import { ConversationList, type InboxFilter } from '@/features/inbox/conversation-list';
+import { ChatWindow } from '@/features/inbox/chat-window';
+import { PatientContextPanel } from '@/features/inbox/patient-context';
+import { LinkConversationDialog } from '@/features/inbox/link-dialog';
+import { highestStatus } from '@/features/inbox/message-bubble';
 
 /**
  * The patient inbox.
  *
- * Conversations carry a triage state (open, waiting, closed) and an assignee,
- * because a shared inbox with no owner is a shared inbox nobody answers.
+ * Three panes: conversations, the thread, and who the patient is. The third one
+ * is the reason this is not a generic chat client — someone answering "is my
+ * report ready?" needs the allergy banner and the last visit in the same glance,
+ * not a tab away.
+ *
+ * THE SELECTED CONVERSATION IS NOT IN THE URL. It is component state. A URL
+ * carrying a conversation id ends up in browser history, in the referrer of any
+ * outbound link, and in every screenshot of a clinic screen — and it identifies
+ * a patient. The cost is that a thread cannot be deep-linked, which is a real
+ * loss and the right trade here.
  */
 export default function InboxPage() {
-  const [filter, setFilter] = React.useState<'all' | 'open'>('all');
-  const { data, isLoading } = useConversations(filter);
-  const conversations = data?.items ?? [];
-  const unlinked = conversations.filter((c) => c.isUnlinked).length;
+  const queryClient = useQueryClient();
+  const streamStatus = useStreamStatus();
+
+  const [filter, setFilter] = React.useState<InboxFilter>('all');
+  const [selected, setSelected] = React.useState<Conversation | null>(null);
+  const [contextOpen, setContextOpen] = React.useState(true);
+  const [linking, setLinking] = React.useState<Conversation | null>(null);
+
+  /**
+   * Live delivery state.
+   *
+   * Held here rather than in the message list because the events arrive for the
+   * whole clinic, including conversations that are not open — switching threads
+   * should not lose ticks already seen. Folded with highestStatus so a late
+   * `delivered` cannot pull a bubble back from two ticks to one.
+   */
+  const [statusOverrides, setStatusOverrides] = React.useState<
+    Record<string, CommunicationStatus>
+  >({});
+
+  const conversations = useConversations(filter);
+  const templates = useQuery({
+    queryKey: ['whatsapp', 'templates'],
+    queryFn: () =>
+      api
+        .get<{ items: WhatsappTemplate[] }>('/whatsapp/templates')
+        .catch(() => ({ items: [] as WhatsappTemplate[] })),
+    staleTime: 5 * 60_000,
+  });
+
+  const onEvent = React.useCallback(
+    (event: ServerEvent) => {
+      if (event.type === 'message-status') {
+        const messageId = event.data.messageId as string | undefined;
+        const status = event.data.status as CommunicationStatus | undefined;
+        if (!messageId || !status) return;
+
+        setStatusOverrides((current) => ({
+          ...current,
+          [messageId]: highestStatus(current[messageId] ?? 'QUEUED', status),
+        }));
+        return;
+      }
+
+      if (event.type === 'message-new' || event.type === 'conversation-changed') {
+        // Refetch rather than patching the cache from the payload. The event
+        // deliberately carries identifiers only, so the list and the thread are
+        // reloaded through the ordinary RLS-scoped endpoints — which is also
+        // what keeps a stale client from rendering something it may no longer
+        // be entitled to.
+        void queryClient.invalidateQueries({ queryKey: ['inbox'] });
+        void queryClient.invalidateQueries({ queryKey: ['nav-counts'] });
+
+        const conversationId = event.data.conversationId as string | undefined;
+        if (conversationId) {
+          void queryClient.invalidateQueries({ queryKey: qk.conversation(conversationId) });
+        }
+      }
+    },
+    [queryClient],
+  );
+
+  useServerEvents(onEvent);
+
+  // Keep the selected conversation's own row fresh as the list reloads, so the
+  // header and the window countdown do not drift from the list beside them.
+  // Memoised because it is an effect dependency: `?? []` allocates a new array
+  // every render, which would re-run the effect continuously.
+  const items = React.useMemo(
+    () => conversations.data?.items ?? [],
+    [conversations.data],
+  );
+  React.useEffect(() => {
+    if (!selected) return;
+    const latest = items.find((c) => c.id === selected.id);
+    if (latest && latest !== selected) setSelected(latest);
+  }, [items, selected]);
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-4">
-      <PageHeader
-        title="Inbox"
-        description="Messages from patients, on the clinic's own number."
-        actions={
-          <div className="flex gap-1">
-            <Button
-              size="sm"
-              variant={filter === 'all' ? 'primary' : 'secondary'}
-              onClick={() => setFilter('all')}
-            >
-              All
-            </Button>
-            <Button
-              size="sm"
-              variant={filter === 'open' ? 'primary' : 'secondary'}
-              onClick={() => setFilter('open')}
-            >
-              Needs a reply
-            </Button>
-          </div>
-        }
-      />
+    <div className="flex h-[calc(100dvh-3.5rem)] min-h-0 overflow-hidden rounded-lg border border-line bg-surface shadow-raise">
+      {/*
+        On a phone the list and the thread are one pane at a time: 1366×768 is
+        the stated design target, but a receptionist checks the inbox on a phone
+        between patients and two panes at 375px is neither.
+      */}
+      <div className={selected ? 'hidden lg:flex' : 'flex w-full lg:w-auto'}>
+        <ConversationList
+          conversations={items}
+          loading={conversations.isLoading}
+          selectedId={selected?.id ?? null}
+          onSelect={setSelected}
+          filter={filter}
+          onFilterChange={setFilter}
+          streamStatus={streamStatus}
+        />
+      </div>
 
-      {unlinked > 0 ? (
-        <Link
-          href="/inbox/unlinked"
-          className="flex items-center gap-2.5 rounded-md border border-info-line bg-info-soft px-3 py-2 text-sm text-info hover:bg-info-soft/70"
-        >
-          <Link2Off className="size-4 shrink-0" aria-hidden />
-          <span className="flex-1">
-            {unlinked} conversation{unlinked === 1 ? '' : 's'} could not be matched to a
-            patient
-          </span>
-          <span className="font-medium">Review →</span>
-        </Link>
+      {selected ? (
+        <ChatWindow
+          conversationId={selected.id}
+          templates={templates.data?.items ?? []}
+          statusOverrides={statusOverrides}
+          onBack={() => setSelected(null)}
+          contextOpen={contextOpen}
+          onToggleContext={() => setContextOpen((open) => !open)}
+          onLinkRequested={setLinking}
+        />
+      ) : (
+        <div className="hidden flex-1 items-center justify-center lg:flex">
+          <EmptyState
+            icon={MessageSquare}
+            title="Choose a conversation"
+            description="Messages from patients arrive here on the clinic's own number."
+          />
+        </div>
+      )}
+
+      {selected && contextOpen ? (
+        <PatientContextPanel
+          conversation={selected}
+          onLinkRequested={() => setLinking(selected)}
+        />
       ) : null}
 
-      <Panel>
-        <PanelHeader title="Conversations" description={`${conversations.length} total`} />
-        {isLoading ? (
-          <SkeletonRows rows={5} />
-        ) : conversations.length === 0 ? (
-          <EmptyState icon={Inbox} title="No messages yet" />
-        ) : (
-          <ul className="divide-y divide-line-soft">
-            {conversations.map((conversation) => {
-              const open = isWindowOpen(conversation.windowExpiresAt);
-              return (
-                <li key={conversation.id}>
-                  <Link
-                    href={`/inbox/${conversation.id}`}
-                    className="flex items-start gap-3 px-4 py-3 hover:bg-surface-sunk"
-                  >
-                    <MessageSquare
-                      className="mt-0.5 size-4 shrink-0 text-ink-faint"
-                      aria-hidden
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-medium text-ink">
-                          {conversation.patientName ?? formatPhone(conversation.counterpartyE164)}
-                        </span>
-                        {conversation.isUnread ? (
-                          <Badge tone="accent">{conversation.unreadCount} new</Badge>
-                        ) : null}
-                        {conversation.isUnlinked ? (
-                          <Badge tone="info">Not linked</Badge>
-                        ) : null}
-                        {conversation.isOptedOut ? (
-                          <Badge tone="warning">Opted out</Badge>
-                        ) : null}
-                        {!open ? <Badge tone="neutral">Window closed</Badge> : null}
-                      </div>
-                      <p className="mt-0.5 truncate text-xs text-ink-soft">
-                        {conversation.lastMessagePreview ?? 'No messages'}
-                      </p>
-                    </div>
-                    <span className="shrink-0 text-2xs text-ink-faint">
-                      {relativeTime(conversation.lastInboundAt)}
-                    </span>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </Panel>
+      <LinkConversationDialog
+        conversation={linking}
+        onClose={() => setLinking(null)}
+        onLinked={() => {
+          setLinking(null);
+          void queryClient.invalidateQueries({ queryKey: ['inbox'] });
+        }}
+      />
     </div>
   );
 }

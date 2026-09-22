@@ -16,6 +16,7 @@ import { PrescribingModule } from './modules/prescribing/prescribing.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { CommsModule } from './modules/comms/comms.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
+import { EventsModule } from './modules/events/events.module';
 import { TasksModule } from './modules/tasks/tasks.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { ReportsModule } from './modules/reports/reports.module';
@@ -51,6 +52,7 @@ import { NavModule } from './modules/nav/nav.module';
     DocumentsModule,
     CommsModule,
     MessagingModule,
+    EventsModule,
     TasksModule,
     BillingModule,
     ReportsModule,

@@ -72,6 +72,16 @@ async function forward(request: NextRequest, path: string[]): Promise<Response> 
     body: bodyText,
     redirect: 'manual',
     cache: 'no-store',
+    /*
+     * Tie the upstream request to the browser's.
+     *
+     * Matters most for the event stream, which is held open for hours: without
+     * this, closing a tab leaves the API writing into a socket nobody is
+     * reading, and every reload adds another. A clinic that leaves the inbox
+     * open all day accumulates one dead stream per refresh until the API runs
+     * out of connections.
+     */
+    signal: request.signal,
   });
 
   const response = new NextResponse(upstream.body, {
@@ -79,9 +89,16 @@ async function forward(request: NextRequest, path: string[]): Promise<Response> 
     statusText: upstream.statusText,
   });
 
-  // Pass through the content type, the correlation id and any session cookie
-  // the API rotated. Nothing else crosses back.
-  for (const key of ['content-type', 'x-request-id']) {
+  /*
+   * Pass through the content type, the correlation id, the cache directives and
+   * any session cookie the API rotated. Nothing else crosses back.
+   *
+   * cache-control and x-accel-buffering are here for the event stream. Dropping
+   * them lets an intermediary buffer the response, which holds every event
+   * until the buffer fills — so a live feed arrives in silent bursts minutes
+   * apart and looks exactly like a broken feature rather than a proxy setting.
+   */
+  for (const key of ['content-type', 'x-request-id', 'cache-control', 'x-accel-buffering']) {
     const value = upstream.headers.get(key);
     if (value) response.headers.set(key, value);
   }

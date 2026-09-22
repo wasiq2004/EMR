@@ -44,6 +44,15 @@ const Env = z.object({
   /** Days a new clinician may work before two-factor is enforced. */
   MFA_GRACE_DAYS: z.coerce.number().int().default(7),
 
+  /**
+   * Fans real-time events out across API replicas.
+   *
+   * Optional. With one instance the event bus is in-process and correct; this
+   * is what makes a second instance's browsers see the first instance's
+   * messages. Its absence degrades real-time updates, never correctness.
+   */
+  REDIS_URL: z.string().optional(),
+
   /** Where uploaded and generated files live. */
   STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
   STORAGE_LOCAL_PATH: z.string().default('/var/lib/emr/objects'),
