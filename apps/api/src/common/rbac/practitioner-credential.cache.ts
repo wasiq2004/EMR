@@ -24,13 +24,26 @@ export class PractitionerCredentialCache {
     const cached = this.cache.get(key);
     if (cached && cached.expiresAt > Date.now()) return cached.value;
 
-    const result = await this.db.execute<{ number: string | null }>(sql`
-      SELECT medical_registration_number AS "number"
-      FROM app_user
-      WHERE id = ${userId}::uuid AND clinic_id = ${clinicId}::uuid AND is_active = true
-    `);
+    /*
+     * Scoped, in its own transaction. app_user is under forced RLS, so an
+     * unscoped read returns no row — and a missing row here does not look like
+     * a database problem, it looks like a doctor who has no registration number
+     * and therefore may not sign anything. Every doctor in the clinic is
+     * silently stripped of the right to finalise a consultation.
+     *
+     * Both ids come from the verified access token.
+     */
+    const value = await this.db.transaction(async (tx) => {
+      await tx.execute(sql`SET TRANSACTION READ ONLY`);
+      await tx.execute(sql`SELECT set_config('app.clinic_id', ${clinicId}, true)`);
 
-    const value = result.rows[0]?.number ?? null;
+      const result = await tx.execute(sql`
+        SELECT medical_registration_number AS "number"
+        FROM app_user
+        WHERE id = ${userId}::uuid AND clinic_id = ${clinicId}::uuid AND is_active = true
+      `);
+      return (result.rows[0] as { number: string | null } | undefined)?.number ?? null;
+    });
     this.cache.set(key, { value, expiresAt: Date.now() + PractitionerCredentialCache.TTL_MS });
     return value;
   }

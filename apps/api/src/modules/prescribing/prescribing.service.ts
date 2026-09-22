@@ -1,16 +1,23 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { and, eq, or, sql } from 'drizzle-orm';
 import * as schema from '@emr/db/schema';
 import type { DrugCatalogueItem, MedicationRequest } from '@emr/contracts';
 import { SYSTEM_CLINIC_ID } from '@emr/db/schema';
 import { TenantDb } from '../../common/tenancy/tenant-db.service';
 import { TenantContext } from '../../common/tenancy/tenant-context';
+import { evaluateSafety } from './safety';
 
 /**
  * Prescribing.
  *
  * WHAT THE CATALOGUE SUPPORTS, AND WHAT IT DOES NOT. This ships with the pilot
- * drug list: search, allergy cross-checking against the clinic's own records,
+ * drug list: search, allergy cross-checking against the clinic's own records
+ * (computed on the server — see `safety.ts`),
  * and duplicate-therapy detection. It does NOT support drug-to-drug interaction
  * checking, contraindication-against-condition, weight-based paediatric dosing
  * or pregnancy category — those need a licensed formulary that has not been
@@ -108,6 +115,39 @@ export class PrescribingService {
         );
       }
 
+      /*
+       * Safety runs HERE, on the server, and its result is what gets stored.
+       *
+       * The client sends what it displayed, and that is useful for knowing what
+       * the doctor saw — but it is not evidence that a check ran, because a
+       * request that simply omits it would otherwise be recorded as clean.
+       */
+      const warnings = await evaluateSafety(tx, {
+        patientId: encounter.patientId,
+        encounterId,
+        drugDisplayName: String(input.drugDisplayName),
+        moleculeName: (input.moleculeName as string) ?? null,
+      });
+
+      const overrideReason =
+        typeof input.safetyOverrideReason === 'string' && input.safetyOverrideReason.trim()
+          ? input.safetyOverrideReason.trim()
+          : null;
+
+      const blocking = warnings.filter((w) => w.severity === 'BLOCKING');
+
+      // A blocking warning may be overridden, but not silently. Refusing until
+      // a reason is written is the whole mechanism: it puts the decision, and
+      // the name of whoever made it, into the record.
+      if (blocking.length > 0 && !overrideReason) {
+        throw new UnprocessableEntityException({
+          code: 'SAFETY_WARNING',
+          title: 'Check this prescription before continuing',
+          message: blocking.map((w) => w.title).join(' '),
+          warnings,
+        });
+      }
+
       // Catalogue version is stamped on every line, so a later clinical review
       // can establish exactly what reference data was in force at the time.
       const [catalogueVersion] = await tx
@@ -140,15 +180,18 @@ export class PrescribingService {
           // What the system warned about, and what the clinician decided. This
           // is the clinic's evidence of safe practice and the product's
           // evidence of having warned.
-          safetyWarningsShown: (input.safetyWarningsShown as never) ?? [],
-          safetyOverrideReason: (input.safetyOverrideReason as string) ?? null,
+          safetyWarningsShown: warnings as never,
+          safetyOverrideReason: overrideReason,
           catalogueVersionAtPrescribing: catalogueVersion?.version ?? null,
           createdBy: ctx.userId,
           updatedBy: ctx.userId,
         })
         .returning();
 
-      return serialiseLine(created!);
+      // The warnings travel back with the created line so the prescription pad
+      // can show what was flagged and accepted, rather than only what was
+      // flagged and refused.
+      return { ...serialiseLine(created!), safetyWarningsShown: warnings } as MedicationRequest;
     });
   }
 

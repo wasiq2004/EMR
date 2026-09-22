@@ -30,27 +30,36 @@ Checkpoint (build + typecheck + test + commit) after every 5 tasks.
 
 ## Stage 2 — Clinical API
 
-- [ ] 6. Patients: search, duplicate check, register, update, snapshot, merge
-- [ ] 7. Scheduling: live queue, walk-ins, reorder, appointments
-- [ ] 8. Clinical: encounters, observations, conditions, allergies, internal notes
-- [ ] 9. Prescribing: drug search, lines, safety checks, finalise and sign
+- [x] 6. Patients: search, duplicate check, register, update, snapshot, merge
+- [x] 7. Scheduling: live queue, walk-ins, reorder, appointments
+- [x] 8. Clinical: encounters, observations, conditions, allergies, internal notes
+- [x] 9. Prescribing: drug search, lines, safety checks, finalise and sign
 - [ ] 10. Documents: upload URLs, share links with OTP
 
-> **CHECKPOINT 2** — the whole consultation flow works against the database
+> **CHECKPOINT 2 — CLEARED.** `scripts/verify/consultation-flow.sh` walks one
+> consultation end to end against the live database: the receptionist searches,
+> registers and queues; the nurse records vitals; the doctor opens, drafts,
+> prescribes, signs; the invoice is raised and paid. 27 cases, including the
+> four that must fail — reception opening a consultation, an unregistered doctor
+> signing one, a penicillin reaching a penicillin-allergic patient, and a signed
+> record being edited.
 
 ## Stage 3 — Operational API
 
-- [ ] 11. Communication: conversations, messages, the unlinked queue
-- [ ] 12. Tasks
-- [ ] 13. Billing: invoices, payments
-- [ ] 14. Reports
-- [ ] 15. Settings: clinic, staff, services, templates, reminders
+- [x] 11. Communication: conversations, messages, the unlinked queue
+- [x] 12. Tasks
+- [x] 13. Billing: invoices, payments
+- [x] 14. Reports
+- [x] 15. Settings: clinic, staff, services, templates, reminders
 
-> **CHECKPOINT 3** — every endpoint the frontend calls exists for real
+> **CHECKPOINT 3 — CLEARED.** 69 cases green across both suites in
+> `scripts/verify/`. Task 10 (share links with OTP) is written but its upload
+> path is only exercised once documents have real bytes behind them — covered
+> under task 23.
 
 ## Stage 4 — Data, wiring and containers
 
-- [ ] 16. Audit trail endpoint, import and export
+- [x] 16. Audit trail endpoint, import and export
 - [x] 17. Seed script carrying the Annex 5 acceptance fixtures
 - [ ] 18. Point the frontend at the real API and retire the mock path
 - [ ] 19. Docker: Postgres and Redis with health checks and init

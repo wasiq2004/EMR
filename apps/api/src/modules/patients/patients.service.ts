@@ -482,10 +482,21 @@ export class PatientsService {
     })) as PatientSummary[];
   }
 
-  /** Human-readable, sequential per clinic. Spoken aloud at the desk. */
+  /**
+   * Human-readable, sequential per clinic. Spoken aloud at the desk.
+   *
+   * The character class is `[^0-9]` rather than the shorter `\D` on purpose.
+   * This is a JS template literal, where a backslash sequence is an escape: the
+   * shorter form collapses to a bare `D`, which silently strips the letter D
+   * from every MRN and then asks Postgres to cast `MRN-000118` to a bigint. The
+   * explicit class cannot be written wrong.
+   *
+   * Runs inside the caller's transaction, so RLS confines the scan to this
+   * clinic and the number is theirs alone.
+   */
   private async nextMrn(tx: { execute: (q: never) => Promise<{ rows: { next: number }[] }> }) {
     const result = await tx.execute(sql`
-      SELECT coalesce(max(nullif(regexp_replace(mrn, '\D', '', 'g'), '')::bigint), 0) + 1 AS next
+      SELECT coalesce(max(nullif(regexp_replace(mrn, '[^0-9]', '', 'g'), '')::bigint), 0) + 1 AS next
       FROM patient
     ` as never);
     const next = Number(result.rows[0]?.next ?? 1);

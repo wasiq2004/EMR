@@ -63,6 +63,15 @@ export class ProblemDetailsFilter implements ExceptionFilter {
         status,
         detail: (body.message as string) ?? exception.message,
         ...(body.code ? { code: body.code } : {}),
+        // Forwarded by name, never by spreading the thrown body. A refusal is
+        // often the most useful response the client gets — a prescription
+        // blocked on an allergy has to render as a warning card with the
+        // substance and its criticality, not as a sentence — but only these
+        // keys cross the boundary, so a future thrower cannot leak internals by
+        // attaching them to an exception.
+        ...(body.errors ? { errors: body.errors } : {}),
+        ...(body.warnings ? { warnings: body.warnings } : {}),
+        ...(body.duplicates ? { duplicates: body.duplicates } : {}),
         instance: url,
         requestId,
       });
