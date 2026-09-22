@@ -11,6 +11,12 @@
 #   API_BASE=http://localhost:4000/v1 bash scripts/verify/broadcast.sh
 S="${TMPDIR:-/tmp}"
 API="${API_BASE:-http://localhost:4000/v1}"
+
+if [ -z "${VERIFY_DOMAIN:-}" ]; then
+  echo "  This suite needs fixtures. Run it through scripts/verify/all.sh," >&2
+  echo "  or: eval \"$(node scripts/verify/fixtures.mjs up)\"" >&2
+  exit 2
+fi
 J="$S/bc-cookies.txt"; rm -f "$J"
 
 pass=0; fail=0
@@ -27,18 +33,18 @@ req() {
   fi
   CODE="${out##*$'\n'}"; BODY="${out%$'\n'*}"
 }
-login() { rm -f "$J"; req POST /auth/login "{\"email\":\"$1\",\"password\":\"demo1234\"}"; }
+login() { rm -f "$J"; req POST /auth/login "{\"email\":\"$1\",\"password\":\"$VERIFY_PASSWORD\"}"; }
 jnum()  { printf '%s' "$1" | grep -o "\"$2\":[0-9]*" | head -1 | cut -d: -f2; }
 jget()  { printf '%s' "$1" | grep -o "\"$2\":\"[^\"]*\"" | head -1 | cut -d'"' -f4; }
 
 echo "-- only an administrator may broadcast --"
-login priya.k@sunriseclinic.in
+login reception@$VERIFY_DOMAIN
 req POST /broadcasts/preview '{"purpose":"CLINICAL","audienceFilter":{}}'
 check "a receptionist is refused" 403 "$CODE" "$BODY"
 req GET /broadcasts
 check "and cannot list them either" 403 "$CODE" "$BODY"
 
-login owner@sunriseclinic.in
+login owner@$VERIFY_DOMAIN
 check "login (admin)" 201 "$CODE" "$BODY"
 
 echo "-- consent decides the audience --"

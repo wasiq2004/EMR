@@ -19,65 +19,78 @@ node -e "const c=require('crypto');for(const k of ['JWT_SECRET','APP_DB_PASSWORD
 docker compose up --build
 ```
 
-Then open <http://localhost:3000> and sign in as any of these with the password
-`demo1234`:
+Nothing can be signed into yet: there are no clinics and no accounts. Create
+one.
 
-| Email | Role | What it can do |
-|---|---|---|
-| `priya.k@sunriseclinic.in` | Receptionist | Register, queue, bill. No clinical content. |
-| `anjali.mehta@sunriseclinic.in` | Doctor | Consult, prescribe, sign. |
-| `rakesh.iyer@sunriseclinic.in` | Doctor | Same, but **no registration number** — cannot sign. |
-| `fatima.s@sunriseclinic.in` | Nurse | Vitals and allergies. Cannot diagnose or prescribe. |
-| `owner@sunriseclinic.in` | Clinic Admin | Settings, staff, reports. Cannot sign a prescription. |
-| `compliance@sunriseclinic.in` | Auditor | The audit trail. **No patient data at all.** |
+```bash
+pnpm --filter @emr/api provision \
+  --name "Sunrise Family Clinic" \
+  --slug sunrise \
+  --admin-email owner@sunriseclinic.in \
+  --admin-name "Vikram Rao" \
+  --city Pune --state Maharashtra --pincode 411005 --phone "+912025530012"
+```
+
+It prints a one-time password. Read it out rather than sending it — no mail
+provider is connected, and saying so plainly beats pretending an email was sent.
+It is not stored in plaintext and cannot be shown again. Then open
+<http://localhost:3000> and sign in.
+
+Everything else — staff, services, consent text, the WhatsApp number — is set up
+from Settings by that administrator.
 
 Secrets have no defaults. Compose refuses to start and names the missing
 variable, because a default secret is one that everyone who has ever cloned this
 repository knows, and it works — which is how it reaches production.
 
-Set `SEED_DEMO_DATA=false` for a real clinic. The shared drug catalogue still
-seeds; the demo patients do not.
-
 ---
 
-## What the demo data is
+## What ships in the database
 
-Not decoration. Every seeded patient is a fixture from
-[the prototype verification script](./docs/phase-0/05-prototype-verification-script.md),
-the scripted acceptance test this build is measured against:
+Nothing but the drug catalogue.
 
-- **`+91 98765 43210` carries three registered family members.** Searching that
-  number at the front desk is how you find out whether the duplicate check works.
-- **Mohd Imran and Mohammed Imran share a date of birth** on different numbers.
-- **Lakshmi Narayanan is HIGH-criticality penicillin-allergic**, and the obvious
-  prescription for a sore throat is a penicillin. Try prescribing Mox 500.
-- **One patient has a stated age and no date of birth**, which is the common case
-  and which most EMRs refuse to accept.
-- **Govind Rao Deshpande is on enough medicines to overflow a prescription page.**
+There are no clinics, no patients and no accounts. A system that ships with a
+fictional clinic inside it invites two failures: it gets demonstrated against
+records shaped to make the demonstration work, and sooner or later a real
+deployment carries invented patients alongside real ones with nothing marking
+which is which.
 
-Seeding the traps means the system can be walked through the acceptance script
-from the first minute, rather than demonstrated on clean data that hides the
-failures the script exists to find.
+The catalogue is reference data rather than sample data — without it the
+prescribing screen has nothing to search. It is a working list for an Indian
+outpatient clinic and explicitly **not** a licensed formulary: no interaction
+data, no contraindications, no paediatric dosing, no pregnancy categories. That
+is exactly why the prescribing module performs none of those checks and the
+interface shows nothing about them.
 
 ---
 
 ## Verify it
 
-Three suites, each testing something the others cannot.
+Three suites, each testing something the others cannot. Each run builds a clinic,
+asserts against it, and deletes it.
 
 ```bash
-# 1. The API, against the running stack: reads, auth, role separation
-bash scripts/verify/all.sh                # 98 cases
+docker compose up -d
 
-# 2. Pure logic — safety checks, formatting, the RBAC matrix, colour contrast
-pnpm --filter @emr/web test -- --run      # 112 cases
+bash scripts/verify/all.sh       # 98 API cases across three suites
+bash scripts/verify/browser.sh   # 7 walks, every screen, every role
 
-# 3. Every screen, every role, in a real browser
-cd apps/web && npx playwright test        # 7 walks
+pnpm --filter @emr/web test -- --run   # 112 cases of pure logic
 ```
 
-The first two need `docker compose up` first. The browser suite starts its own
-dev server and talks to the containerised API.
+**The suites create their own data.** `scripts/verify/fixtures.mjs` provisions a
+clinic with a random slug, registers patients through the real API — including
+the acceptance traps: three family members on one number, a HIGH-criticality
+penicillin allergy, a patient with a stated age and no date of birth — and
+removes the whole tenant afterwards, even when a suite fails.
+
+Building fixtures through the API rather than by insert means the fixture itself
+proves the path works: a patient cannot be registered without a duplicate check
+having run, because the server enforces that.
+
+Three things are written directly, because no API can create them: an inbound
+WhatsApp conversation arrives by webhook, an approved template is approved by
+Meta, and consent is captured on paper.
 
 **Why the API suites run against a real Postgres and not a mock.** Every bug
 found while wiring this up compiled cleanly and would have passed a unit test
@@ -184,8 +197,15 @@ before the doctor commits, not after.
   is recorded with its real lifecycle, each simulated send is logged at warn,
   and the settings screen says "Recorded only" rather than "Live". Nothing ever
   reports a delivery that did not happen.
-- **No mail provider.** Inviting a staff member returns a one-time password to
-  read out rather than pretending an email was sent.
+- **No mail provider.** Provisioning a clinic and inviting a staff member both
+  return a one-time password to read out rather than pretending an email was
+  sent.
+- **No reminder scheduling.** There was a settings screen for it that reported
+  "Reminder settings saved" and made no request at all; it has been removed
+  rather than left in place looking functional. The rules, the scheduler and
+  the quiet-hours window still need building.
+- **No inbound webhook.** Delivery receipts never arrive, so a message shows as
+  sent and never advances to delivered or read.
 - **Teleconsultation is recorded, not conducted.** A consultation can be marked
   remote — which enforces the Schedule X prohibition and adds the required
   declaration to the printed prescription — but there is no video calling in the

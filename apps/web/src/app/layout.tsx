@@ -27,9 +27,17 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
+  /*
+   * The product, not a clinic.
+   *
+   * This is a multi-tenant deployment and this metadata is rendered before any
+   * session exists, so it cannot know whose clinic this is — naming one meant
+   * every clinic's browser tab, bookmark and shared screenshot carried another
+   * clinic's name.
+   */
   title: {
-    default: 'Sunrise Family Clinic',
-    template: '%s · Sunrise Family Clinic',
+    default: 'Clinic EMR',
+    template: '%s · Clinic EMR',
   },
   description: 'Clinic records, queue and prescriptions.',
   // A clinical record must never be indexed or previewed by anything external.

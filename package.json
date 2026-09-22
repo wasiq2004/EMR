@@ -21,6 +21,8 @@
     "db:seed": "pnpm --filter @emr/api seed"
   },
   "devDependencies": {
+    "argon2": "^0.44.0",
+    "pg": "^8.23.0",
     "typescript": "^5.9.2"
   },
   "pnpm": {

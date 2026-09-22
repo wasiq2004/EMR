@@ -4,7 +4,10 @@ import * as React from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Lock, Printer } from 'lucide-react';
-import { describeFrequency } from '@emr/contracts';
+import { useQuery } from '@tanstack/react-query';
+import { describeFrequency, type Clinic } from '@emr/contracts';
+import { api } from '@/lib/api-client';
+import { qk } from '@/lib/query-client';
 import { usePatient, usePatientSnapshot } from '@/features/patients/api';
 import {
   useEncounter,
@@ -49,6 +52,25 @@ export default function PrescriptionPreviewPage() {
   const router = useRouter();
   const toast = useToast();
   const session = useSession();
+  /*
+   * The issuing clinic's own details, for the letterhead.
+   *
+   * The session carries only the clinic's NAME; the address, phone and
+   * registration number live on the clinic record and are edited in Settings →
+   * Clinic profile. Anything missing is omitted rather than substituted.
+   */
+  const clinic = useQuery({
+    queryKey: qk.clinic,
+    queryFn: () => api.get<Clinic>('/clinic'),
+  });
+
+  const addressLines = [
+    [clinic.data?.addressLine1, clinic.data?.addressLine2].filter(Boolean).join(', '),
+    [clinic.data?.city, clinic.data?.state, clinic.data?.pincode]
+      .filter(Boolean)
+      .join(' '),
+  ].filter((line) => line.length > 0);
+
   const signing = useCanSign();
 
   const encounter = useEncounter(encounterId);
@@ -128,21 +150,50 @@ export default function PrescriptionPreviewPage() {
 
       {/* ---- The document ------------------------------------------------ */}
       <article className="rounded-lg border border-line bg-white p-8 text-[#111] shadow-raise print:border-0 print:shadow-none">
+        {/*
+          THE LETTERHEAD IS READ, NEVER WRITTEN IN.
+
+          Every line here was once a literal — one clinic's address and phone,
+          one doctor's qualifications and registration number — so every
+          prescription printed by every clinic carried them. A prescription
+          bearing an address that is not the issuing clinic's and a registration
+          number that is not the signing doctor's is a forged medical document,
+          not a formatting mistake.
+        */}
         <header className="flex items-start justify-between gap-6 border-b-2 border-[#111] pb-4">
           <div>
             <h1 className="text-xl font-bold">{session.clinicName}</h1>
             <p className="mt-0.5 text-xs leading-relaxed text-[#444]">
-              2nd Floor, Shivam Complex, FC Road, Shivajinagar
-              <br />
-              Pune 411005, Maharashtra
-              <br />
-              {formatPhone('+912025530012')}
+              {addressLines.map((line) => (
+                <React.Fragment key={line}>
+                  {line}
+                  <br />
+                </React.Fragment>
+              ))}
+              {clinic.data?.contactPhoneE164
+                ? formatPhone(clinic.data.contactPhoneE164)
+                : null}
             </p>
+            {clinic.data?.registrationNumber ? (
+              <p className="token mt-0.5 text-2xs text-[#666]">
+                Clinic reg. {clinic.data.registrationNumber}
+              </p>
+            ) : null}
           </div>
           <div className="text-right text-xs text-[#444]">
             <p className="font-semibold text-[#111]">{session.fullName}</p>
-            <p>MBBS, MD (General Medicine)</p>
-            <p className="token">Reg. MMC-2011-44821</p>
+            {session.qualifications ? <p>{session.qualifications}</p> : null}
+            {session.medicalRegistrationNumber ? (
+              <p className="token">
+                Reg. {session.medicalRegistrationNumber}
+                {session.medicalCouncil ? (
+                  <>
+                    <br />
+                    {session.medicalCouncil}
+                  </>
+                ) : null}
+              </p>
+            ) : null}
           </div>
         </header>
 

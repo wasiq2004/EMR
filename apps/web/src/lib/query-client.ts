@@ -92,7 +92,6 @@ export const qk = {
   services: ['settings', 'services'] as QueryKey,
   whatsappAccount: ['settings', 'whatsapp'] as QueryKey,
   messageTemplates: ['settings', 'message-templates'] as QueryKey,
-  reminderRules: ['settings', 'reminders'] as QueryKey,
   importJobs: ['settings', 'imports'] as QueryKey,
   importJob: (id: string) => ['settings', 'imports', id] as QueryKey,
   exportJobs: ['settings', 'exports'] as QueryKey,

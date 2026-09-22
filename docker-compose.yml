@@ -73,6 +73,9 @@ services:
   # A one-shot job rather than an API startup step. Migrations need the owner
   # role; the API must never hold it. Running them separately is also what lets
   # the API scale to more than one task without them racing.
+  #
+  # The seed writes the shared drug catalogue and NOTHING else — no clinics, no
+  # patients, no accounts. Create a clinic with `pnpm --filter @emr/api provision`.
   # ---------------------------------------------------------------------------
   migrate:
     build:
@@ -92,7 +95,6 @@ services:
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}
       WORKER_DB_PASSWORD: ${WORKER_DB_PASSWORD:-}
       READONLY_DB_PASSWORD: ${READONLY_DB_PASSWORD:-}
-      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
     command: ['sh', '-c', 'node dist/database/migrate.js && node dist/database/seed.js']
 
   # ---------------------------------------------------------------------------

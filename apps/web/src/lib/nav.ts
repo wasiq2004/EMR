@@ -308,12 +308,6 @@ export const SETTINGS_LINKS: SettingsLink[] = [
     description: 'Approved messages and their status',
   },
   {
-    label: 'Reminders',
-    href: '/settings/reminders',
-    permission: 'communication:read',
-    description: 'When reminders go out, and when they must not',
-  },
-  {
     label: 'Consent text',
     href: '/settings/consent',
     permission: 'consent:read',

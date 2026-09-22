@@ -8,12 +8,30 @@ import { expect, test, type Page } from '@playwright/test';
  * surfaces in an HTTP status code.
  */
 
+/**
+ * The fixture clinic.
+ *
+ * There is no seeded data: the product ships with no clinics and no accounts.
+ * `scripts/verify/fixtures.mjs up` builds a clinic and exports these, so the
+ * browser suite runs against records it created and can delete afterwards
+ * rather than against invented ones living in the database.
+ */
+const DOMAIN = process.env.VERIFY_DOMAIN;
+const PASSWORD = process.env.VERIFY_PASSWORD;
+
+if (!DOMAIN || !PASSWORD) {
+  throw new Error(
+    'Set VERIFY_DOMAIN and VERIFY_PASSWORD. Run: ' +
+      'eval "$(node scripts/verify/fixtures.mjs up)" && npx playwright test',
+  );
+}
+
 const SIGN_IN: Record<string, string> = {
-  RECEPTIONIST: 'priya.k@sunriseclinic.in',
-  DOCTOR: 'anjali.mehta@sunriseclinic.in',
-  NURSE_ASSISTANT: 'fatima.s@sunriseclinic.in',
-  OWNER_ADMIN: 'owner@sunriseclinic.in',
-  AUDITOR: 'compliance@sunriseclinic.in',
+  RECEPTIONIST: `reception@${DOMAIN}`,
+  DOCTOR: `doctor@${DOMAIN}`,
+  NURSE_ASSISTANT: `nurse@${DOMAIN}`,
+  OWNER_ADMIN: `owner@${DOMAIN}`,
+  AUDITOR: `auditor@${DOMAIN}`,
 };
 
 /** Noise from the dev server that says nothing about the application. */
@@ -78,9 +96,6 @@ function watchConsole(page: Page): string[] {
 
   return problems;
 }
-
-/** The seeded demo password. Printed by the seed script and on the sign-in screen. */
-const PASSWORD = 'demo1234';
 
 async function signIn(page: Page, role: keyof typeof SIGN_IN) {
   const response = await page.request.post('/api/auth/login', {
@@ -152,7 +167,6 @@ const ADMIN_ROUTES = [
   '/settings/prescription-templates',
   '/settings/whatsapp',
   '/settings/message-templates',
-  '/settings/reminders',
   '/settings/consent',
   '/settings/import',
   '/settings/export',

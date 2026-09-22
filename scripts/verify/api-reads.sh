@@ -11,6 +11,12 @@
 #   API_BASE=http://localhost:4000/v1 bash scripts/verify/api-reads.sh
 S="${TMPDIR:-/tmp}"
 API="${API_BASE:-http://localhost:4000/v1}"
+
+if [ -z "${VERIFY_DOMAIN:-}" ]; then
+  echo "  This suite needs fixtures. Run it through scripts/verify/all.sh," >&2
+  echo "  or: eval \"$(node scripts/verify/fixtures.mjs up)\"" >&2
+  exit 2
+fi
 J="$S/cookies.txt"; rm -f "$J"
 
 pass=0; fail=0
@@ -27,7 +33,7 @@ req() { # method path [data] -> CODE, BODY
   fi
   CODE="${out##*$'\n'}"; BODY="${out%$'\n'*}"
 }
-login() { rm -f "$J"; req POST /auth/login "{\"email\":\"$1\",\"password\":\"demo1234\"}"; }
+login() { rm -f "$J"; req POST /auth/login "{\"email\":\"$1\",\"password\":\"$VERIFY_PASSWORD\"}"; }
 
 echo "-- health --"
 req GET /healthz; check "healthz" 200 "$CODE" "$BODY"
@@ -37,10 +43,10 @@ echo "-- an anonymous caller gets nothing --"
 req GET /patients; check "patients denied when signed out" 401 "$CODE" "$BODY"
 
 echo "-- sign in --"
-login anjali.mehta@sunriseclinic.in; check "login (doctor)" 201 "$CODE" "$BODY"
-req POST /auth/login '{"email":"anjali.mehta@sunriseclinic.in","password":"wrong-password"}'
+login doctor@$VERIFY_DOMAIN; check "login (doctor)" 201 "$CODE" "$BODY"
+req POST /auth/login "{\"email\":\"doctor@$VERIFY_DOMAIN\",\"password\":\"definitely-not-the-password\"}"
 check "a wrong password is refused" 401 "$CODE" "$BODY"
-login anjali.mehta@sunriseclinic.in
+login doctor@$VERIFY_DOMAIN
 req GET /auth/me; check "auth/me" 200 "$CODE" "$BODY"
 
 echo "-- reads the doctor is entitled to --"
@@ -69,7 +75,7 @@ else
   check "search returned a patient id" y n
 fi
 
-req GET '/patients?q=9876543210'
+req GET "/patients?q=${VERIFY_SHARED_NUMBER#+91}"
 N=$(printf '%s' "$BODY" | grep -o '"mrn"' | wc -l)
 check "the shared number returns all three family members" 3 "$N" "$BODY"
 
@@ -77,22 +83,22 @@ echo "-- roles are separated --"
 req GET /audit-events; check "a doctor may not read the audit trail" 403 "$CODE" "$BODY"
 req GET /imports;      check "a doctor may not run an import"        403 "$CODE" "$BODY"
 
-login compliance@sunriseclinic.in; check "login (auditor)" 201 "$CODE" "$BODY"
+login auditor@$VERIFY_DOMAIN; check "login (auditor)" 201 "$CODE" "$BODY"
 req GET /audit-events; check "an auditor may read the audit trail" 200 "$CODE" "$BODY"
 req GET /patients;     check "an auditor may not read patients"    403 "$CODE" "$BODY"
 
-login priya.k@sunriseclinic.in; check "login (receptionist)" 201 "$CODE" "$BODY"
+login reception@$VERIFY_DOMAIN; check "login (receptionist)" 201 "$CODE" "$BODY"
 req GET /patients;     check "a receptionist may read patients" 200 "$CODE" "$BODY"
 req GET /audit-events; check "a receptionist may not read the audit trail" 403 "$CODE" "$BODY"
 
 echo "-- the audit trail actually recorded all of this --"
-login compliance@sunriseclinic.in
+login auditor@$VERIFY_DOMAIN
 req GET /audit-events
 N=$(printf '%s' "$BODY" | grep -o '"action"' | wc -l)
 [ "$N" -gt 0 ] && check "audit events were written" y y || check "audit events were written" y n
 
 echo "-- sign out --"
-login anjali.mehta@sunriseclinic.in
+login doctor@$VERIFY_DOMAIN
 req POST /auth/logout; check "logout" 204 "$CODE" "$BODY"
 req GET /patients;     check "denied again after logout" 401 "$CODE" "$BODY"
 

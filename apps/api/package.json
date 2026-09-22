@@ -8,6 +8,7 @@
     "dev": "nest start --watch",
     "migrate": "tsx src/database/migrate.ts",
     "seed": "tsx src/database/seed.ts",
+    "provision": "tsx src/database/provision.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
     "prebuild": "pnpm --filter @emr/contracts --filter @emr/db build"

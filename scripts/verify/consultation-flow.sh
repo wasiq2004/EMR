@@ -10,6 +10,12 @@
 #   API_BASE=http://localhost:4000/v1 bash scripts/verify/consultation-flow.sh
 S="${TMPDIR:-/tmp}"
 API="${API_BASE:-http://localhost:4000/v1}"
+
+if [ -z "${VERIFY_DOMAIN:-}" ]; then
+  echo "  This suite needs fixtures. Run it through scripts/verify/all.sh," >&2
+  echo "  or: eval \"$(node scripts/verify/fixtures.mjs up)\"" >&2
+  exit 2
+fi
 J="$S/flow-cookies.txt"; rm -f "$J"
 
 pass=0; fail=0
@@ -27,14 +33,14 @@ req() {
   fi
   CODE="${out##*$'\n'}"; BODY="${out%$'\n'*}"
 }
-login() { rm -f "$J"; req POST /auth/login "{\"email\":\"$1\",\"password\":\"demo1234\"}"; }
+login() { rm -f "$J"; req POST /auth/login "{\"email\":\"$1\",\"password\":\"$VERIFY_PASSWORD\"}"; }
 jget()  { printf '%s' "$1" | grep -o "\"$2\":\"[^\"]*\"" | head -1 | cut -d'"' -f4; }
 jnum()  { printf '%s' "$1" | grep -o "\"$2\":[0-9]*"     | head -1 | cut -d: -f2; }
 
 STAMP=$(date +%s)
 
 echo "-- the receptionist registers a patient --"
-login priya.k@sunriseclinic.in
+login reception@$VERIFY_DOMAIN
 
 # Search before create. The server refuses a registration without proof a
 # duplicate check ran, so this is not optional set-up — it is the workflow.
@@ -76,7 +82,7 @@ req POST /encounters "{\"patientId\":\"$NEW_PID\"}"
 check "reception refused encounter:create" 403 "$CODE" "$BODY"
 
 echo "-- the nurse records vitals --"
-login fatima.s@sunriseclinic.in
+login nurse@$VERIFY_DOMAIN
 req POST /observations "{
   \"patientId\":\"$NEW_PID\",\"encounterId\":null,
   \"code\":\"8310-5\",\"display\":\"Temperature\",
@@ -85,7 +91,7 @@ req POST /observations "{
 check "nurse records a temperature" 201 "$CODE" "$BODY"
 
 echo "-- the doctor consults --"
-login anjali.mehta@sunriseclinic.in
+login doctor@$VERIFY_DOMAIN
 req POST /encounters "{\"patientId\":\"$NEW_PID\"}"
 check "open a consultation" 201 "$CODE" "$BODY"
 # Asserted here, on a patient registered seconds ago, because opening a
@@ -218,14 +224,14 @@ req PATCH "/encounters/$ENC" '{"chiefComplaint":"tampered"}' "If-Match: 99"
                     || check "a finalised consultation cannot be edited" refused refused
 
 echo "-- the doctor without a registration number cannot sign --"
-login rakesh.iyer@sunriseclinic.in
+login unregistered@$VERIFY_DOMAIN
 req POST /encounters "{\"patientId\":\"$NEW_PID\"}"
 RENC=$(jget "$BODY" id)
 req POST "/encounters/$RENC/finalise" "" "If-Match: 1"
 check "an unregistered doctor is refused at signing" 403 "$CODE" "$BODY"
 
 echo "-- an approved template is sendable in the inbox, window or not --"
-login priya.k@sunriseclinic.in
+login reception@$VERIFY_DOMAIN
 req GET /whatsapp/templates
 TPL=$(jget "$BODY" id)
 
@@ -253,7 +259,7 @@ else
 fi
 
 echo "-- billing --"
-login priya.k@sunriseclinic.in
+login reception@$VERIFY_DOMAIN
 req POST /invoices "{\"patientId\":\"$NEW_PID\",\"lineItems\":[{\"description\":\"New consultation\",\"quantity\":1,\"unitPricePaise\":60000,\"amountPaise\":60000}]}"
 check "raise an invoice" 201 "$CODE" "$BODY"
 INV=$(jget "$BODY" id)

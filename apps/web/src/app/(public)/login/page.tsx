@@ -5,20 +5,12 @@ import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Stethoscope } from 'lucide-react';
-import { LoginInput, ROLE_LABEL, type UserRole } from '@emr/contracts';
+import { LoginInput } from '@emr/contracts';
 import { ApiError, api } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
 import { Field, Input } from '@/components/ui/field';
 import { Alert } from '@/components/ui/feedback';
 
-/**
- * The seeded demo password.
- *
- * One constant, used by the prefilled form and by the role buttons below, so
- * the two cannot disagree — which they did: the buttons posted `demo` long
- * after the seed moved to this value, and every one of them silently failed.
- */
-const DEMO_PASSWORD = 'demo1234';
 
 /**
  * Sign in.
@@ -44,7 +36,7 @@ export default function LoginPage() {
 
   const form = useForm({
     resolver: zodResolver(LoginInput),
-    defaultValues: { email: 'priya.k@sunriseclinic.in', password: DEMO_PASSWORD },
+    defaultValues: { email: '', password: '' },
   });
 
   const onSubmit = form.handleSubmit(async (values) => {
@@ -72,7 +64,7 @@ export default function LoginPage() {
             <Stethoscope className="size-4.5" />
           </span>
           <div>
-            <h1 className="text-lg font-semibold text-ink">Sunrise Family Clinic</h1>
+            <h1 className="text-lg font-semibold text-ink">Clinic EMR</h1>
             <p className="text-xs text-ink-faint">Sign in to continue</p>
           </div>
         </div>
@@ -126,68 +118,6 @@ export default function LoginPage() {
           </p>
         </form>
 
-        <DemoRolePicker />
-      </div>
-    </div>
-  );
-}
-
-/**
- * Development only. Lets a reviewer see each panel without seeding five
- * accounts. This component is not rendered once API_BASE_URL is configured,
- * because the real session comes from a verified token.
- */
-function DemoRolePicker() {
-  const router = useRouter();
-  const roles: UserRole[] = [
-    'RECEPTIONIST',
-    'DOCTOR',
-    'NURSE_ASSISTANT',
-    'OWNER_ADMIN',
-    'AUDITOR',
-  ];
-
-  const emails: Record<UserRole, string> = {
-    RECEPTIONIST: 'priya.k@sunriseclinic.in',
-    DOCTOR: 'anjali.mehta@sunriseclinic.in',
-    NURSE_ASSISTANT: 'fatima.s@sunriseclinic.in',
-    OWNER_ADMIN: 'owner@sunriseclinic.in',
-    AUDITOR: 'compliance@sunriseclinic.in',
-  };
-
-  const signInAs = async (role: UserRole) => {
-    await api.post('/auth/login', { email: emails[role], password: DEMO_PASSWORD });
-    router.push(role === 'AUDITOR' ? '/audit' : '/today');
-    router.refresh();
-  };
-
-  return (
-    <div className="mt-4 rounded-md border border-dashed border-line p-3">
-      <p className="text-2xs font-semibold uppercase tracking-wide text-ink-faint">
-        Demo · open a panel
-      </p>
-      <p className="mt-1 text-xs leading-relaxed text-ink-soft">
-        Sample data only, signing in with the password{' '}
-        {/*
-          The full stop lives INSIDE the span with the code element. Putting it
-          on the next JSX line makes JSX insert a space before it, and a
-          floating full stop is the kind of small wrongness that reads as
-          sloppy without the reader being able to say why.
-        */}
-        <span className="whitespace-nowrap">
-          <code className="rounded-xs bg-surface-sunk px-1 py-0.5 font-mono">
-            {DEMO_PASSWORD}
-          </code>
-          .
-        </span>{' '}
-        Not part of the production sign-in.
-      </p>
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {roles.map((role) => (
-          <Button key={role} size="sm" variant="secondary" onClick={() => signInAs(role)}>
-            {ROLE_LABEL[role]}
-          </Button>
-        ))}
       </div>
     </div>
   );
