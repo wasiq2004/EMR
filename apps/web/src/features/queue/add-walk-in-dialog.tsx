@@ -66,7 +66,9 @@ export function AddWalkInDialog({
     enabled: open,
   });
 
-  const doctors = staff?.items ?? [];
+  // `?? []` allocates a fresh array on every render, and this list is an effect
+  // dependency — without the memo the effect re-runs continuously.
+  const doctors = React.useMemo(() => staff?.items ?? [], [staff]);
 
   React.useEffect(() => {
     if (!open) {

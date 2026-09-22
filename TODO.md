@@ -82,6 +82,33 @@ Checkpoint (build + typecheck + test + commit) after every 5 tasks.
 
 ## Stage 6 — Handover
 
-- [ ] 26. README and runbook
-- [ ] 27. Final verification: build, lint, unit, e2e, docker
-- [ ] 28. Final commit
+- [x] 26. README and runbook
+- [x] 27. Final verification: build, lint, unit, e2e, docker
+- [x] 28. Final commit
+
+---
+
+## Final verification — cold build, 2026-09-22
+
+`docker compose down -v && docker compose build && docker compose up -d`, then:
+
+| Suite | Result |
+|---|---|
+| Typecheck — contracts, db, api, web | 0 errors |
+| Lint — api, web | 0 errors, 0 warnings |
+| `scripts/verify/api-reads.sh` | 42 passed |
+| `scripts/verify/consultation-flow.sh` | 27 passed |
+| `pnpm --filter @emr/web test` | 111 passed |
+| `npx playwright test` | 7 passed |
+| `docker compose ps` | 4 of 4 healthy |
+
+Database, checked directly rather than asserted: 29 of 29 tenant tables under
+FORCED row-level security, exactly 3 SECURITY DEFINER functions (the reviewed
+pre-tenant resolvers), `emr_app` NOBYPASSRLS and not superuser, the resolver role
+BYPASSRLS but NOLOGIN, and the messaging worker holding no privilege at all on
+`encounter_internal_note`.
+
+Known gaps are listed in the README and are deliberate, not unfinished: WhatsApp
+has no Business API credential, there is no mail provider, the Schedule X
+telemedicine rule needs an in-person/remote flag on the encounter before it can
+be evaluated, and object storage is local disk.

@@ -46,7 +46,8 @@ async function bootstrap() {
 }
 
 bootstrap().catch((error) => {
-  // eslint-disable-next-line no-console
+  // console, not the Nest logger: the failure may be that the logger never got
+  // built. This is the last thing the process does.
   console.error('The API failed to start:', error);
   process.exit(1);
 });

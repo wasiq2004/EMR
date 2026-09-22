@@ -1,7 +1,10 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": "./src",
+    // No rootDir. This config only typechecks, and it covers drizzle.config.ts,
+    // which sits beside src/ rather than inside it — a rootDir of ./src makes
+    // that an error. rootDir belongs in tsconfig.build.json, where it decides
+    // the shape of dist/, and that config compiles src/ alone.
     "noEmit": true,
     "types": ["node"]
   },
