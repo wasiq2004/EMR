@@ -1,10 +1,13 @@
-import { Body, Controller, Get, Module, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Module, Param, Post } from '@nestjs/common';
 import { z } from 'zod';
 
-import { Audit, RequirePermission } from '../../common/http/decorators';
+import { Audit, RequirePermission, SkipAudit } from '../../common/http/decorators';
 import { parseBody } from '../../common/http/zod.pipe';
 import { WhatsAppClient } from './whatsapp.client';
 import { WhatsAppAccountService } from './whatsapp-account.service';
+import { AudienceService, type AudienceFilter } from './audience.service';
+import { BroadcastService } from './broadcast.service';
+import { requireUuid } from '../../common/http/zod.pipe';
 
 /**
  * Connecting a WhatsApp number and keeping its templates in step.
@@ -74,9 +77,129 @@ export class WhatsAppController {
   }
 }
 
+const Purpose = z.enum(['CLINICAL', 'MARKETING']);
+
+const Audience = z.object({
+  tags: z.array(z.string()).optional(),
+  seenWithinDays: z.number().int().positive().optional(),
+  notSeenForDays: z.number().int().positive().optional(),
+  ageMin: z.number().int().min(0).max(130).optional(),
+  ageMax: z.number().int().min(0).max(130).optional(),
+  gender: z.enum(['MALE', 'FEMALE', 'OTHER']).optional(),
+  patientIds: z.array(z.string().uuid()).optional(),
+});
+
+const CreateBroadcast = z.object({
+  name: z.string().trim().min(2, 'Give this broadcast a name you will recognise later'),
+  templateId: z.string().uuid('Choose a template'),
+  purpose: Purpose,
+  audienceFilter: Audience,
+  templateVariables: z.record(z.string(), z.string()).optional(),
+});
+
+/**
+ * Broadcasts.
+ *
+ * Everything that reaches more than one patient is `communication:broadcast`,
+ * which only a Clinic Admin holds. The blast radius is categorically different
+ * from a reply: a mistake in one message reaches one person, and a mistake here
+ * reaches the register.
+ */
+@Controller('broadcasts')
+export class BroadcastController {
+  constructor(private readonly broadcasts: BroadcastService) {}
+
+  @RequirePermission('communication:broadcast')
+  @Get()
+  async list() {
+    return { items: await this.broadcasts.list() };
+  }
+
+  /**
+   * Counts who a filter would reach WITHOUT creating anything.
+   *
+   * A POST because the filter is a structured body rather than a handful of
+   * query parameters, and because an audience query over the whole register is
+   * not something to leave in a browser history.
+   */
+  @RequirePermission('communication:broadcast')
+  @SkipAudit()
+  // 200, not the 201 Nest gives a POST by default. Nothing is created here —
+  // this is a question, and it is a POST only because the filter is a
+  // structured body that has no business sitting in a browser history.
+  @HttpCode(200)
+  @Post('preview')
+  preview(@Body() body: unknown) {
+    const input = parseBody(
+      z.object({ purpose: Purpose, audienceFilter: Audience }),
+      body,
+    );
+    return this.broadcasts.preview(input.audienceFilter as AudienceFilter, input.purpose);
+  }
+
+  @RequirePermission('communication:broadcast')
+  @Audit('BROADCAST_CREATED', 'broadcast')
+  @Post()
+  create(@Body() body: unknown) {
+    const input = parseBody(CreateBroadcast, body);
+    return this.broadcasts.create({
+      ...input,
+      audienceFilter: input.audienceFilter as AudienceFilter,
+    });
+  }
+
+  @RequirePermission('communication:broadcast')
+  @Get(':id')
+  byId(@Param('id') id: string) {
+    return this.broadcasts.byId(requireUuid(id, 'Broadcast'));
+  }
+
+  @RequirePermission('communication:broadcast')
+  @Get(':id/recipients')
+  async recipients(@Param('id') id: string) {
+    return { items: await this.broadcasts.recipients(requireUuid(id, 'Broadcast')) };
+  }
+
+  /** One message to one number, so the author sees the real thing first. */
+  @RequirePermission('communication:broadcast')
+  @Audit('BROADCAST_TEST_SENT', 'broadcast')
+  @Post(':id/test')
+  test(@Param('id') id: string, @Body() body: unknown) {
+    const input = parseBody(
+      z.object({ toE164: z.string().regex(/^\+[1-9]\d{7,14}$/, 'Enter a number in +91… form') }),
+      body,
+    );
+    return this.broadcasts.test(requireUuid(id, 'Broadcast'), input.toE164);
+  }
+
+  @RequirePermission('communication:broadcast')
+  @Audit('BROADCAST_SENT', 'broadcast')
+  @Post(':id/send')
+  send(@Param('id') id: string) {
+    return this.broadcasts.send(requireUuid(id, 'Broadcast'));
+  }
+
+  @RequirePermission('communication:broadcast')
+  @Audit('BROADCAST_RETRIED', 'broadcast')
+  @Post(':id/retry')
+  retry(@Param('id') id: string) {
+    return this.broadcasts.retry(requireUuid(id, 'Broadcast'));
+  }
+
+  @RequirePermission('communication:broadcast')
+  @Audit('BROADCAST_CANCELLED', 'broadcast')
+  @Post(':id/cancel')
+  cancel(@Param('id') id: string, @Body() body: { reason?: string }) {
+    return this.broadcasts.cancel(
+      requireUuid(id, 'Broadcast'),
+      body?.reason?.trim() || 'Cancelled by an administrator',
+    );
+  }
+}
+
 @Module({
-  controllers: [WhatsAppController],
-  providers: [WhatsAppClient, WhatsAppAccountService],
+  controllers: [WhatsAppController, BroadcastController],
+  providers: [WhatsAppClient, WhatsAppAccountService, AudienceService, BroadcastService],
   exports: [WhatsAppClient, WhatsAppAccountService],
 })
 export class MessagingModule {}

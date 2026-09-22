@@ -6,7 +6,7 @@
 set -u
 here="$(dirname "$0")"
 rc=0
-for suite in api-reads consultation-flow; do
+for suite in api-reads consultation-flow broadcast; do
   echo "=============================================================="
   echo " $suite"
   echo "=============================================================="

@@ -464,6 +464,45 @@ async function seedDemoClinic(db: Database) {
        ${lakshmi}::uuid, NULL, ${new Date(Date.now() + days(2))}, ${doctor}::uuid)
   `);
 
+  /* --- Consent -------------------------------------------------------------
+   *
+   * Deliberately PARTIAL and deliberately uneven, because that is what a real
+   * register looks like and because the broadcast screen's whole job is to show
+   * how many people it cannot reach.
+   *
+   * Most patients consented to be contacted about their care. Far fewer agreed
+   * to marketing — which is the honest ratio, and it means a marketing
+   * broadcast on this data visibly reaches a fraction of a clinical one rather
+   * than looking identical to it.
+   */
+  const consentFor = (mrn: string, scope: string, method: string) => sql`
+    INSERT INTO consent (clinic_id, patient_id, scope, status, policy_version,
+                         capture_method, presented_language, granted_at, created_by)
+    VALUES (${CLINIC_ID}::uuid, ${patientIds[mrn]}::uuid, ${scope}, 'ACTIVE', 'v1.0',
+            ${method}, 'en', ${ago(days(200))}, ${reception}::uuid)
+  `;
+
+  for (const mrn of [
+    'MRN-000118', 'MRN-000119', 'MRN-000120', 'MRN-000042',
+    'MRN-000201', 'MRN-000310', 'MRN-000355', 'MRN-000401',
+  ]) {
+    await db.execute(consentFor(mrn, 'WHATSAPP_COMMUNICATION', 'VERBAL_AT_DESK'));
+  }
+
+  // Marketing is a separate act of consent, and most people decline it.
+  for (const mrn of ['MRN-000118', 'MRN-000401']) {
+    await db.execute(consentFor(mrn, 'MARKETING_COMMUNICATION', 'WRITTEN_FORM'));
+  }
+
+  // One patient who asked to stop. An opt-out beats a consent — it is the more
+  // recent and more specific signal — and the audience builder must show that.
+  await db.execute(sql`
+    INSERT INTO whatsapp_conversation (clinic_id, patient_id, counterparty_e164,
+                                       status, is_unread, is_opted_out, opted_out_at, created_by)
+    VALUES (${CLINIC_ID}::uuid, ${patientIds['MRN-000276']}::uuid, '+919922998877',
+            'CLOSED', false, true, ${ago(days(30))}, ${reception}::uuid)
+  `);
+
   /* --- Billing ------------------------------------------------------------ */
 
   await db.execute(sql`

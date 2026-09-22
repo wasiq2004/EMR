@@ -25,6 +25,7 @@ import {
   ShieldCheck,
   UserRound,
   Users,
+  Megaphone,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { Route } from 'next';
@@ -159,6 +160,14 @@ const ALL_SECTIONS: NavSection[] = [
         href: '/inbox/unlinked',
         icon: MessageSquare,
         permission: 'communication:read',
+      },
+      {
+        // Admin-only, by permission rather than by a role list: the blast
+        // radius is what makes it different, and the matrix already says so.
+        label: 'Broadcasts',
+        href: '/broadcasts',
+        icon: Megaphone,
+        permission: 'communication:broadcast',
       },
     ],
   },

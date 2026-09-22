@@ -52,13 +52,16 @@ CRM. Checkpoint after every five.
 
 ## Stage 3 — Broadcast
 
-- [ ] 14. Audience builder with consent gating and an exclusion breakdown
-- [ ] 15. Broadcast create / preview / test-send
-- [ ] 16. Send: queue, rate limit, per-recipient status
-- [ ] 17. Retry failures, cancel a running broadcast
-- [ ] 18. Broadcast UI
+- [x] 14. Audience builder with consent gating and an exclusion breakdown
+- [x] 15. Broadcast create / preview / test-send
+- [x] 16. Send: queue, rate limit, per-recipient status
+- [x] 17. Retry failures, cancel a running broadcast
+- [x] 18. Broadcast UI
 
-> **CHECKPOINT 4** — a broadcast reaches only patients who consented
+> **CHECKPOINT 4 — CLEARED.** The same audience reaches 6 people clinically and
+> 2 for marketing, the shared family number is messaged once, an opt-out beats a
+> consent, and a sent broadcast cannot be sent twice. 15 cases in
+> `scripts/verify/broadcast.sh`.
 
 ## Stage 4 — Finish
 

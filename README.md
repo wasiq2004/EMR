@@ -67,7 +67,7 @@ Three suites, each testing something the others cannot.
 
 ```bash
 # 1. The API, against the running stack: reads, auth, role separation
-bash scripts/verify/all.sh                # 77 cases
+bash scripts/verify/all.sh                # 92 cases
 
 # 2. Pure logic — safety checks, formatting, the RBAC matrix, colour contrast
 pnpm --filter @emr/web test -- --run      # 112 cases
@@ -178,9 +178,12 @@ before the doctor commits, not after.
 
 ## Known gaps
 
-- **WhatsApp is wired but not connected.** The conversation model, the 24-hour
-  window, template handling and the unlinked-message queue all exist and are
-  seeded. There is no Business API credential, so nothing is actually sent.
+- **WhatsApp is connectable but this deployment has no credential.** A clinic
+  connects its own number in Settings; the credential is verified against Meta
+  before it is stored. Without one the client SIMULATES sending — every message
+  is recorded with its real lifecycle, each simulated send is logged at warn,
+  and the settings screen says "Recorded only" rather than "Live". Nothing ever
+  reports a delivery that did not happen.
 - **No mail provider.** Inviting a staff member returns a one-time password to
   read out rather than pretending an email was sent.
 - **Teleconsultation is recorded, not conducted.** A consultation can be marked
