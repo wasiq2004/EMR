@@ -62,6 +62,19 @@ export const ACTIONS = [
   'share',
   'merge',
   'execute',
+  /**
+   * Change how a channel is set up — connect a WhatsApp number, sync its
+   * templates, disconnect it. Distinct from `communication:create`, which is
+   * permission to send ONE message to ONE patient: a receptionist needs that
+   * every hour and must never be able to repoint the clinic's number.
+   */
+  'configure',
+  /**
+   * Send to many patients at once. Its own action because the blast radius is
+   * categorically different — a mistake in a reply reaches one person, and a
+   * mistake in a broadcast reaches the register.
+   */
+  'broadcast',
 ] as const;
 
 export type Resource = (typeof RESOURCES)[number];
@@ -89,7 +102,9 @@ const OWNER_ADMIN: Permission[] = [
   ...p('allergy', 'read'),
   ...p('prescription', 'read'),
   ...p('document', 'read', 'create', 'share'),
-  ...p('communication', 'read', 'create'),
+  // Configure and broadcast are admin-only. See the ACTIONS notes for why they
+  // are not folded into `create`.
+  ...p('communication', 'read', 'create', 'configure', 'broadcast'),
   ...p('task', 'read', 'create', 'update'),
   ...p('consent', 'read', 'create', 'update'),
   ...p('invoice', 'read', 'create', 'update', 'delete'),

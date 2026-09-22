@@ -40,22 +40,4 @@ export class CommsController {
     );
   }
 
-  @RequirePermission('communication:read')
-  @Get('whatsapp/account')
-  account() {
-    return this.comms.account();
-  }
-
-  /**
-   * Approved templates.
-   *
-   * Two are kept per purpose: the provider can reject or pause one without
-   * warning and retroactively, and a single template per purpose would mean one
-   * rejection takes that channel down entirely.
-   */
-  @RequirePermission('communication:read')
-  @Get('whatsapp/templates')
-  templates() {
-    return { items: [] };
-  }
 }

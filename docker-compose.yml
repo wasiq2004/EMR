@@ -88,6 +88,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-emr_migrator}:${POSTGRES_PASSWORD:-emr_migrator}@postgres:5432/${POSTGRES_DB:-emr}
       MIGRATION_DATABASE_URL: postgres://${POSTGRES_USER:-emr_migrator}:${POSTGRES_PASSWORD:-emr_migrator}@postgres:5432/${POSTGRES_DB:-emr}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env — see .env.example}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env}
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}
       WORKER_DB_PASSWORD: ${WORKER_DB_PASSWORD:-}
       READONLY_DB_PASSWORD: ${READONLY_DB_PASSWORD:-}
@@ -119,6 +120,10 @@ services:
       DATABASE_URL: postgres://emr_app:${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-emr}
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env — see .env.example}
+      # Encrypts each clinic's WhatsApp access token. Changing it makes every
+      # stored token unreadable and every clinic has to reconnect, so it is
+      # deliberately NOT derived from JWT_SECRET, which is rotated routinely.
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env}
       STORAGE_DRIVER: local
       STORAGE_LOCAL_PATH: /var/lib/emr/objects
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}

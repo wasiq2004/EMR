@@ -128,8 +128,68 @@ export const WhatsappAccount = z.object({
   localStorageRegion: z.string().nullable(),
   isActive: z.boolean(),
   connectedAt: IsoDateTime.nullable(),
+
+  /**
+   * Whether this deployment can actually send.
+   *
+   * A connected row can exist with no usable access token, and the gap between
+   * "connected" and "will send" is the most important thing the settings screen
+   * communicates. A clinic that believes a prescription reminder reached a
+   * patient, when it reached nobody, is worse off than one that knows the
+   * channel is not live.
+   */
+  canSend: z.boolean(),
+  /** Last four characters of the token, so two numbers can be told apart. */
+  tokenHint: z.string().nullable(),
+  wabaId: z.string().nullable(),
+  phoneNumberId: z.string().nullable(),
 });
 export type WhatsappAccount = z.infer<typeof WhatsappAccount>;
+
+/**
+ * A template as the PROVIDER holds it, mirrored locally.
+ *
+ * Distinct from `MessageTemplate` above, and the two axes are different:
+ * `MessageTemplate.purpose` says which clinic workflow sends it (an appointment
+ * reminder, a report-ready note); `purpose` here says which CONSENT its content
+ * requires. A template can be an appointment reminder and clinical, or a camp
+ * invitation and marketing, and only the second axis decides who may lawfully
+ * receive it.
+ */
+export const WhatsappTemplate = z.object({
+  id: Uuid,
+  name: z.string(),
+  language: z.string(),
+  category: z.string().nullable(),
+  status: z.enum(['DRAFT', 'PENDING', 'APPROVED', 'REJECTED', 'PAUSED', 'DISABLED']),
+  /** The provider's reason, when rejected or paused. */
+  statusReason: z.string().nullable(),
+  body: z.string(),
+  headerText: z.string().nullable(),
+  footerText: z.string().nullable(),
+  buttons: z
+    .array(z.object({ type: z.string(), text: z.string(), url: z.string().optional() }))
+    .nullable(),
+  variables: z.array(z.object({ index: z.number().int(), label: z.string() })),
+  purpose: z.enum(['CLINICAL', 'MARKETING']),
+  lastSyncedAt: IsoDateTime.nullable(),
+});
+export type WhatsappTemplate = z.infer<typeof WhatsappTemplate>;
+
+export const ConnectWhatsapp = z.object({
+  wabaId: z
+    .string()
+    .trim()
+    .min(5, 'Enter the WhatsApp Business Account ID')
+    .regex(/^\d+$/, 'The WABA ID is all digits — copy it from Meta Business Manager'),
+  phoneNumberId: z
+    .string()
+    .trim()
+    .min(5, 'Enter the Phone Number ID')
+    .regex(/^\d+$/, 'The Phone Number ID is all digits — it is not the phone number itself'),
+  accessToken: z.string().trim().min(20, 'Enter the permanent access token'),
+});
+export type ConnectWhatsapp = z.infer<typeof ConnectWhatsapp>;
 
 export const ReminderRule = z.object({
   id: Uuid,

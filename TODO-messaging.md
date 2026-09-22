@@ -21,11 +21,14 @@ CRM. Checkpoint after every five.
 
 - [x] 1. Token encryption: `access_token_encrypted` needs a real cipher
 - [x] 2. Migration: message templates, broadcasts, broadcast recipients
-- [ ] 3. WhatsApp account connect / verify / disconnect API
-- [ ] 4. Settings → WhatsApp screen
-- [ ] 5. Template sync and listing
+- [x] 3. WhatsApp account connect / verify / disconnect API
+- [x] 4. Settings → WhatsApp screen
+- [x] 5. Template sync and listing
 
-> **CHECKPOINT 1** — a clinic can connect a number and see its templates
+> **CHECKPOINT 1 — CLEARED.** An administrator can connect a number, the
+> credential is verified against Meta before anything is stored, a receptionist
+> is refused (403), templates sync and list, and the screen says plainly whether
+> the number can actually send.
 
 ## Stage 2 — The live inbox
 

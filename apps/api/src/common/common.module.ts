@@ -9,6 +9,7 @@ import { PasswordService } from './auth/password.service';
 import { TokenService } from './auth/token.service';
 import { TokenRevocationCache } from './auth/token-revocation.cache';
 import { OtpService } from './auth/otp.service';
+import { SecretBoxService } from './crypto/secret-box.service';
 
 /**
  * Cross-cutting infrastructure.
@@ -41,6 +42,7 @@ import { OtpService } from './auth/otp.service';
     TokenService,
     TokenRevocationCache,
     OtpService,
+    SecretBoxService,
   ],
   exports: [
     ClinicStatusCache,
@@ -52,6 +54,7 @@ import { OtpService } from './auth/otp.service';
     TokenService,
     TokenRevocationCache,
     OtpService,
+    SecretBoxService,
   ],
 })
 export class CommonModule {}
