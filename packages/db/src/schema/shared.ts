@@ -174,6 +174,29 @@ export const broadcastExclusionEnum = pgEnum('broadcast_exclusion_reason', [
   'DECEASED_OR_MERGED',
 ]);
 
+/**
+ * What a platform operator may do.
+ *
+ * Three levels, because "can see that a clinic exists" and "can suspend it" are
+ * not the same authority and should not be held by the same people by default.
+ */
+export const platformRoleEnum = pgEnum('platform_role', [
+  /** Read-only: tenant list, health, usage. Changes nothing. */
+  'SUPPORT',
+  /** Suspend, restore, change a plan. The day-to-day operator. */
+  'OPERATOR',
+  /** The above, plus managing other platform users. */
+  'PLATFORM_ADMIN',
+]);
+
+export const subscriptionStatusEnum = pgEnum('subscription_status', [
+  'TRIAL',
+  'ACTIVE',
+  'PAST_DUE',
+  'SUSPENDED',
+  'CANCELLED',
+]);
+
 /** FHIR Condition.clinicalStatus. */
 export const conditionClinicalStatusEnum = pgEnum('condition_clinical_status', [
   'ACTIVE',

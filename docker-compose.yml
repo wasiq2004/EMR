@@ -94,6 +94,7 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env}
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}
       WORKER_DB_PASSWORD: ${WORKER_DB_PASSWORD:-}
+      PLATFORM_DB_PASSWORD: ${PLATFORM_DB_PASSWORD:-}
       READONLY_DB_PASSWORD: ${READONLY_DB_PASSWORD:-}
     command: ['sh', '-c', 'node dist/database/migrate.js && node dist/database/seed.js']
 
@@ -120,6 +121,10 @@ services:
       NODE_ENV: production
       PORT: 4000
       DATABASE_URL: postgres://emr_app:${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-emr}
+      # The operations console's own connection. A DIFFERENT ROLE, with no
+      # privilege on any clinical table — that grant list is what stops a
+      # platform operator reading a patient, and the migration asserts it.
+      PLATFORM_DATABASE_URL: postgres://emr_platform:${PLATFORM_DB_PASSWORD:?set PLATFORM_DB_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-emr}
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env — see .env.example}
       # Encrypts each clinic's WhatsApp access token. Changing it makes every

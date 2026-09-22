@@ -45,6 +45,19 @@ const Env = z.object({
   MFA_GRACE_DAYS: z.coerce.number().int().default(7),
 
   /**
+   * The operations console's own connection, as `emr_platform`.
+   *
+   * A SEPARATE ROLE, not a separate schema. That role has privileges on five
+   * platform tables and on `clinic`, and none at all on `patient`, `encounter`,
+   * `communication` or `app_user` — so a bug in a console endpoint cannot read
+   * clinical data, because the database refuses rather than a policy filtering.
+   *
+   * Absent means the console is not served. A deployment that does not want one
+   * simply does not set this.
+   */
+  PLATFORM_DATABASE_URL: z.string().optional(),
+
+  /**
    * Fans real-time events out across API replicas.
    *
    * Optional. With one instance the event bus is in-process and correct; this

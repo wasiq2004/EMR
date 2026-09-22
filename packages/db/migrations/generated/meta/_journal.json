@@ -15,6 +15,13 @@
       "when": 1790073231812,
       "tag": "0001_messaging",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790084170502,
+      "tag": "0002_platform",
+      "breakpoints": true
     }
   ]
 }

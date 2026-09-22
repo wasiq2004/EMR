@@ -72,7 +72,7 @@ asserts against it, and deletes it.
 ```bash
 docker compose up -d
 
-bash scripts/verify/all.sh       # 98 API cases across three suites
+bash scripts/verify/all.sh       # 120 API cases across four suites
 bash scripts/verify/browser.sh   # 7 walks, every screen, every role
 
 pnpm --filter @emr/web test -- --run   # 112 cases of pure logic
@@ -215,6 +215,45 @@ before the doctor commits, not after.
 - **`next build` fails on Windows without Developer Mode.** Next's standalone
   output needs symlink permission. The compile succeeds; only the copy step
   fails. Docker builds on Linux and is unaffected.
+
+---
+
+## The operations console
+
+A second application at `/platform`, for whoever runs the deployment rather than
+a clinic. Overview of the estate, every clinic with its plan and usage, suspend
+and restore, plan changes, and an append-only log of what operators did.
+
+```bash
+pnpm --filter @emr/api provision-operator   --email ops@yourcompany.in --name "Your Name" --role PLATFORM_ADMIN
+```
+
+**It holds no patient data.** Not redacted, not access-logged — absent. That is
+enforced by a grant, not a policy: the console runs on its own connection as
+`emr_platform`, a role with privileges on five platform tables and on `clinic`,
+and none at all on `patient`, `encounter`, `communication` or `app_user`. It
+cannot read a medical record because the database refuses, and
+`0005_platform_plane.sql` asserts that grant list on every migration — add a
+privilege to a clinical table and the deployment fails rather than shipping a
+console that can read records.
+
+Activity inside a clinic is visible only as `clinic_usage_daily`: integers and a
+date, written by a job that runs inside each tenant's own context. The console
+reads counts. It never reads rows.
+
+The two identity systems are separate — different table, different cookie,
+different token audience. A clinic administrator gets 401 on every console
+endpoint and an operator gets 401 on every clinical one, both verified in
+`scripts/verify/platform.sh`.
+
+Changing a clinic's state requires a written reason, because suspending one
+stops a doctor mid-consultation. The reason goes into a log the clinic can be
+shown and that no operator can edit — a trigger rejects UPDATE and DELETE.
+
+**What it deliberately cannot do:** impersonate a clinic user, read a clinic's
+own audit trail, or open a patient record. Supporting a clinic that needs
+someone to look at their data is a break-glass procedure at the infrastructure
+level, time-boxed and separately logged — not a button in a console.
 
 ---
 

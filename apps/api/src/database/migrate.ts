@@ -124,6 +124,7 @@ async function setRolePasswords(client: pg.Client): Promise<void> {
     ['emr_app', process.env.APP_DB_PASSWORD],
     ['emr_worker_messaging', process.env.WORKER_DB_PASSWORD],
     ['emr_readonly', process.env.READONLY_DB_PASSWORD],
+    ['emr_platform', process.env.PLATFORM_DB_PASSWORD],
   ];
 
   for (const [role, password] of roles) {

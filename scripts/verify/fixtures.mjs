@@ -276,6 +276,20 @@ async function up() {
       [clinicId],
     );
 
+    /*
+     * A platform operator.
+     *
+     * Written directly for the same reason the clinic administrator is: it is
+     * what `provision-operator.ts` does, and a suite cannot shell out to it
+     * portably. This account is deleted with the rest of the run.
+     */
+    const operatorEmail = `ops-${stamp}@verify.test`;
+    await pool.query(
+      `INSERT INTO platform_user (full_name, email, password_hash, role)
+       VALUES ($1,$2,$3,'PLATFORM_ADMIN')`,
+      [`Verify Operator ${stamp}`, operatorEmail, hash],
+    );
+
     // Shell assignments the suites source.
     console.log(`export VERIFY_CLINIC_ID='${clinicId}'`);
     console.log(`export VERIFY_SLUG='${slug}'`);
@@ -284,6 +298,8 @@ async function up() {
     console.log(`export VERIFY_PATIENT_ALLERGIC='${lakshmi.id}'`);
     console.log(`export VERIFY_PATIENT_PLAIN='${arjun.id}'`);
     console.log(`export VERIFY_SHARED_NUMBER='${shared}'`);
+    console.log(`export VERIFY_OPERATOR_EMAIL='${operatorEmail}'`);
+    console.log(`export VERIFY_OPERATOR_PASSWORD='${PASSWORD}'`);
   } finally {
     await pool.end();
   }
@@ -328,6 +344,9 @@ async function down(clinicId) {
          SET session_replication_role = origin;
        END $do$;`,
     );
+    // platform_user has no clinic_id, so the sweep above does not reach it.
+    await pool.query(`DELETE FROM platform_user WHERE email LIKE '%@verify.test'`);
+
     console.error(`  torn down ${clinicId}`);
   } finally {
     await pool.end();

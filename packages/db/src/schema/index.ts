@@ -16,3 +16,4 @@ export * from './clinical';
 export * from './comms';
 export * from './messaging';
 export * from './ops';
+export * from './platform';
