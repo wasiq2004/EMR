@@ -84,6 +84,47 @@ export class SettingsService {
   }
 
   /**
+   * The bookable practitioners.
+   *
+   * Separate from `staff()` and deliberately narrower. Reception has to choose
+   * which doctor an appointment is with, and the walk-in dialog has to offer
+   * the same list — but neither needs the staff directory, which carries email
+   * addresses, roles, lockout state and last-sign-in times. Granting `user:read`
+   * to the front desk to make a dropdown work would hand over all of it.
+   *
+   * Gated on `appointment:read` instead: whoever can see the diary can see who
+   * the appointments are with. Four fields leave, and the registration flag is
+   * one of them so the interface can say why a doctor cannot sign rather than
+   * failing at the last step.
+   */
+  async practitioners(): Promise<
+    { id: string; fullName: string; qualifications: string | null; hasMedicalRegistration: boolean }[]
+  > {
+    const rows = await this.tenantDb.runReadOnly((tx) =>
+      tx
+        .select({
+          id: schema.appUser.id,
+          fullName: schema.appUser.fullName,
+          qualifications: schema.appUser.qualifications,
+          registration: schema.appUser.medicalRegistrationNumber,
+          role: schema.appUser.role,
+          isActive: schema.appUser.isActive,
+        })
+        .from(schema.appUser)
+        .orderBy(asc(schema.appUser.fullName)),
+    );
+
+    return rows
+      .filter((row) => row.isActive && row.role === 'DOCTOR')
+      .map((row) => ({
+        id: row.id,
+        fullName: row.fullName,
+        qualifications: row.qualifications,
+        hasMedicalRegistration: Boolean(row.registration),
+      }));
+  }
+
+  /**
    * Invites a staff member.
    *
    * Returns a one-time password rather than emailing one, because no mail
@@ -226,6 +267,13 @@ class SettingsController {
   @Get('users')
   async staff() {
     return { items: await this.settings.staff() };
+  }
+
+  /** The practitioner picker. See `practitioners()` for why it is not `/users`. */
+  @RequirePermission('appointment:read')
+  @Get('practitioners')
+  async practitioners() {
+    return { items: await this.settings.practitioners() };
   }
 
   @RequirePermission('user:create')

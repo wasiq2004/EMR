@@ -70,6 +70,28 @@ export const StaffUser = z.object({
 }).extend(AuditFields.shape);
 export type StaffUser = z.infer<typeof StaffUser>;
 
+/**
+ * A bookable doctor, as a picker needs one.
+ *
+ * Four fields, and that is the point. Reception has to choose which doctor an
+ * appointment is with, and the walk-in dialog offers the same list — neither
+ * needs the staff directory above, which carries email addresses, roles,
+ * lockout state and last-sign-in times. Granting the front desk `user:read` to
+ * make a dropdown work would hand over all of it, so `/practitioners` exists
+ * and is gated on `appointment:read`: whoever can see the diary can see who the
+ * appointments are with.
+ *
+ * `hasMedicalRegistration` travels so the interface can explain up front that a
+ * doctor cannot sign, rather than failing at the last step.
+ */
+export const Practitioner = z.object({
+  id: Uuid,
+  fullName: z.string(),
+  qualifications: z.string().nullable(),
+  hasMedicalRegistration: z.boolean(),
+});
+export type Practitioner = z.infer<typeof Practitioner>;
+
 export const InviteStaff = z.object({
   fullName: z.string().trim().min(2, 'Enter a name'),
   email: z.string().email('Enter a valid email'),

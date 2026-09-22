@@ -4,7 +4,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { Search, UserPlus } from 'lucide-react';
-import type { PatientSummary, StaffUser } from '@emr/contracts';
+import type { PatientSummary, Practitioner } from '@emr/contracts';
 import { api } from '@/lib/api-client';
 import { qk } from '@/lib/query-client';
 import { useAddWalkIn } from './api';
@@ -59,13 +59,14 @@ export function AddWalkInDialog({
     enabled: open && trimmed.length >= 2 && !selected,
   });
 
+  // /practitioners, not /users — see the note in appointments/new.
   const { data: staff } = useQuery({
-    queryKey: qk.staff,
-    queryFn: () => api.get<{ items: StaffUser[] }>('/users'),
+    queryKey: qk.practitioners,
+    queryFn: () => api.get<{ items: Practitioner[] }>('/practitioners'),
     enabled: open,
   });
 
-  const doctors = (staff?.items ?? []).filter((s) => s.role === 'DOCTOR' && s.isActive);
+  const doctors = staff?.items ?? [];
 
   React.useEffect(() => {
     if (!open) {

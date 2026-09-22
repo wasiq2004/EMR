@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, CalendarPlus, Search } from 'lucide-react';
-import type { PatientSummary, ServiceItem, StaffUser } from '@emr/contracts';
+import type { PatientSummary, Practitioner, ServiceItem } from '@emr/contracts';
 import { api, idempotencyKey } from '@/lib/api-client';
 import { qk } from '@/lib/query-client';
 import { ageGender, formatPhone } from '@/lib/format';
@@ -41,9 +41,12 @@ export default function NewAppointmentPage() {
     enabled: term.trim().length >= 2 && !patient,
   });
 
+  // /practitioners, not /users. The front desk needs a list of doctors to book
+  // with; it is not entitled to the staff directory, and asking for one to get
+  // the other is how a dropdown ends up carrying everyone's email address.
   const { data: staff } = useQuery({
-    queryKey: qk.staff,
-    queryFn: () => api.get<{ items: StaffUser[] }>('/users'),
+    queryKey: qk.practitioners,
+    queryFn: () => api.get<{ items: Practitioner[] }>('/practitioners'),
   });
 
   const { data: services } = useQuery({
@@ -52,7 +55,7 @@ export default function NewAppointmentPage() {
       api.get<{ items: ServiceItem[] }>('/services').catch(() => ({ items: [] })),
   });
 
-  const doctors = (staff?.items ?? []).filter((s) => s.role === 'DOCTOR' && s.isActive);
+  const doctors = staff?.items ?? [];
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();

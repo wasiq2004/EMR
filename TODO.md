@@ -74,7 +74,7 @@ Checkpoint (build + typecheck + test + commit) after every 5 tasks.
 - [x] 21. Docker: web image, multi-stage, standalone output
 - [x] 22. `docker-compose.yml` wired end to end with env and health gates
 - [x] 23. Migrate and seed inside the container, verify the stack live
-- [ ] 24. Browser tests against the real backend
+- [x] 24. Browser tests against the real backend
 - [ ] 25. UI polish pass
 
 > **CHECKPOINT 5** — full stack verified in Docker

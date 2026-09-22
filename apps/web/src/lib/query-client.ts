@@ -87,6 +87,8 @@ export const qk = {
   clinic: ['settings', 'clinic'] as QueryKey,
   locations: ['settings', 'locations'] as QueryKey,
   staff: ['settings', 'staff'] as QueryKey,
+  /** The bookable doctors. Distinct from `staff` — see /practitioners on the API. */
+  practitioners: ['practitioners'] as QueryKey,
   services: ['settings', 'services'] as QueryKey,
   whatsappAccount: ['settings', 'whatsapp'] as QueryKey,
   messageTemplates: ['settings', 'message-templates'] as QueryKey,

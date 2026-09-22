@@ -29,8 +29,24 @@ const IGNORED = [
  * The share-link resolver answers 403 to an unverified recipient so the page
  * can ask for the one-time code — a 200 there would mean the document had been
  * handed over without checking who was asking.
+ *
+ * `/api/auth/me` answers 401 when nobody is signed in, which is what the public
+ * screens are. The alternative — 200 with an empty body — would make "signed
+ * out" and "session broken" the same response.
+ *
+ * Nothing else belongs in this list. A 403 anywhere a role is supposed to be
+ * able to work is a bug in the permission matrix or in the screen, and adding
+ * it here is how that bug becomes permanent.
  */
-const EXPECTED_REFUSALS: [number, RegExp][] = [[403, /^\/api\/share\//]];
+const EXPECTED_REFUSALS: [number, RegExp][] = [
+  // 403 asks the recipient for the one-time code; 404 is an unknown, revoked or
+  // expired token. The API returns the same 404 for all three on purpose —
+  // telling a stranger that a link existed and has been revoked tells them a
+  // document exists and who it is about.
+  [403, /^\/api\/share\//],
+  [404, /^\/api\/share\//],
+  [401, /^\/api\/auth\/me$/],
+];
 
 function watchConsole(page: Page): string[] {
   const problems: string[] = [];
@@ -63,10 +79,21 @@ function watchConsole(page: Page): string[] {
   return problems;
 }
 
+/** The seeded demo password. Printed by the seed script and on the sign-in screen. */
+const PASSWORD = 'demo1234';
+
 async function signIn(page: Page, role: keyof typeof SIGN_IN) {
-  await page.request.post('/api/auth/login', {
-    data: { email: SIGN_IN[role], password: 'demo' },
+  const response = await page.request.post('/api/auth/login', {
+    data: { email: SIGN_IN[role], password: PASSWORD },
   });
+
+  // Fail here rather than twenty screens later. A refused sign-in sends every
+  // subsequent visit to /login, where nothing errors and every assertion
+  // passes — the suite goes green having tested the login page five times.
+  expect(
+    response.ok(),
+    `sign-in failed for ${role}: ${response.status()} ${await response.text()}`,
+  ).toBe(true);
 }
 
 /** Opens a route and fails on a console error or the Next error overlay. */
@@ -89,9 +116,13 @@ async function visit(page: Page, path: string, problems: string[]) {
 test.describe('public screens', () => {
   test('sign in, two-factor and the share link render', async ({ page }) => {
     const problems = watchConsole(page);
-    for (const path of ['/login', '/login/mfa', '/share/sometoken']) {
+    for (const path of ['/login', '/login/mfa', '/share/not-a-real-token']) {
       await visit(page, path, problems);
     }
+
+    // The refusal has to be a page, not a blank screen: someone holding a link
+    // that no longer works needs to be told so, in words.
+    await expect(page.getByText(/not valid|expired|no longer/i).first()).toBeVisible();
   });
 });
 
@@ -175,10 +206,9 @@ test('patient record and consultation render for a doctor', async ({ page }) => 
 
   /*
    * Start the consultation the way a doctor does, by pressing the button on
-   * the Snapshot. Seeding one over the API worked but was flaky: the mock
-   * store lives in memory and Next drops it when it compiles a page for the
-   * first time in dev, so the encounter could vanish between being created and
-   * being opened. Going through the UI is both steadier and a better test.
+   * the Snapshot, rather than seeding one over the API. It is the better test:
+   * it exercises the button, the mutation, the redirect and the new route,
+   * which is the sequence that actually breaks.
    */
   await page.goto(`/patients/${patientId}`);
   // Wait for the Snapshot to settle. The action bar re-renders as the
