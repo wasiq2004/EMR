@@ -24,6 +24,14 @@ const Env = z.object({
    * the stack comes up with no setup, and the value is obviously not a secret.
    */
   JWT_SECRET: z.string().min(16).default('development-only-not-a-secret-key'),
+
+  /**
+   * Encrypts secrets held on a clinic's behalf — today, its WhatsApp access
+   * token. SEPARATE FROM JWT_SECRET on purpose: rotating the signing secret
+   * signs everyone out, which is a routine thing to do, and must not also make
+   * every clinic's stored token permanently unreadable.
+   */
+  ENCRYPTION_KEY: z.string().min(32).default('development-only-encryption-key-not-a-secret'),
   ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().default(10 * 60),
   REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().default(30 * 24 * 60 * 60),
 
@@ -61,4 +69,13 @@ export const config = {
 
 if (config.isProduction && config.JWT_SECRET.startsWith('development-only')) {
   throw new Error('JWT_SECRET must be set to a real secret in production.');
+}
+
+if (config.isProduction && config.ENCRYPTION_KEY.startsWith('development-only')) {
+  throw new Error(
+    'ENCRYPTION_KEY must be set to a real secret in production. ' +
+      'It encrypts the WhatsApp access token each clinic holds; changing it ' +
+      'later makes every stored token unreadable and every clinic has to ' +
+      'reconnect.',
+  );
 }

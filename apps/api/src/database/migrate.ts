@@ -59,8 +59,15 @@ async function run() {
     );
 
     const prelude = await sqlFilesIn(MIGRATIONS);
+
+    // Forward slash, ALWAYS. This string is the primary key in
+    // schema_migration, so it must not depend on the platform that wrote it.
+    // path.join gives 'generated/0000_x.sql' on Linux and 'generated\0000_x.sql'
+    // on Windows — so a migration applied by the container was invisible to a
+    // developer running the same runner locally, which re-ran the whole
+    // generated set against a populated database.
     const generated = (await sqlFilesIn(path.join(MIGRATIONS, 'generated'))).map(
-      (f) => path.join('generated', f),
+      (f) => `generated/${f}`,
     );
 
     // Prelude first, then tables, then the security substrate.
@@ -76,7 +83,9 @@ async function run() {
         continue;
       }
 
-      const sql = await readFile(path.join(MIGRATIONS, name), 'utf8');
+      // Split back into segments so the platform separator is reapplied on the
+      // way to the filesystem, while the recorded name stays canonical.
+      const sql = await readFile(path.join(MIGRATIONS, ...name.split('/')), 'utf8');
       console.log(`  run   ${name}`);
 
       // Each migration is one transaction: it lands whole or not at all.

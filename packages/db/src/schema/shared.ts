@@ -129,6 +129,51 @@ export const consultationModeEnum = pgEnum('consultation_mode', [
   'TELECONSULTATION',
 ]);
 
+/** Where a message template stands with the provider. */
+export const templateStatusEnum = pgEnum('message_template_status', [
+  'DRAFT',
+  'PENDING',
+  'APPROVED',
+  'REJECTED',
+  'PAUSED',
+  'DISABLED',
+]);
+
+/**
+ * What a broadcast is FOR, which decides which consent it needs.
+ *
+ * This is the distinction the whole broadcast feature turns on. A reminder that
+ * a prescription is ready rides on the consent a patient gave to be contacted
+ * about their care. "Free eye camp on Sunday" does not — it is marketing, it
+ * needs marketing consent, and sending it under a clinical consent is the thing
+ * that gets a clinic's number blocked and its patients angry.
+ */
+export const broadcastPurposeEnum = pgEnum('broadcast_purpose', [
+  /** Care-related: recalls, camps for existing conditions, clinic closures. */
+  'CLINICAL',
+  /** Promotional. Requires MARKETING_COMMUNICATION consent, separately. */
+  'MARKETING',
+]);
+
+export const broadcastStatusEnum = pgEnum('broadcast_status', [
+  'DRAFT',
+  'SCHEDULED',
+  'SENDING',
+  'PAUSED',
+  'SENT',
+  'CANCELLED',
+  'FAILED',
+]);
+
+/** Why a patient was left out of a broadcast. Shown before it is sent. */
+export const broadcastExclusionEnum = pgEnum('broadcast_exclusion_reason', [
+  'NO_MOBILE',
+  'NO_CONSENT',
+  'OPTED_OUT',
+  'DUPLICATE_NUMBER',
+  'DECEASED_OR_MERGED',
+]);
+
 /** FHIR Condition.clinicalStatus. */
 export const conditionClinicalStatusEnum = pgEnum('condition_clinical_status', [
   'ACTIVE',
