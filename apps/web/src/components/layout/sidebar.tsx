@@ -4,7 +4,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Stethoscope } from 'lucide-react';
-import { navigationFor, PANEL_FOR_ROLE, PANEL_LABEL } from '@/lib/nav';
+import { navigationFor, PANEL_FOR_ROLE, PANEL_LABEL, type BadgeCounts } from '@/lib/nav';
 import { useSession } from '@/lib/session';
 import { cn } from '@/lib/cn';
 import { Badge } from '@/components/ui/badge';
@@ -21,7 +21,7 @@ export function Sidebar({
   counts,
   onNavigate,
 }: {
-  counts?: { inbox?: number; tasks?: number; queue?: number };
+  counts?: BadgeCounts;
   onNavigate?: () => void;
 }) {
   const session = useSession();

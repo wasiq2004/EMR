@@ -125,6 +125,16 @@ services:
       # privilege on any clinical table — that grant list is what stops a
       # platform operator reading a patient, and the migration asserts it.
       PLATFORM_DATABASE_URL: postgres://emr_platform:${PLATFORM_DB_PASSWORD:?set PLATFORM_DB_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-emr}
+      # Owner role, used by EXACTLY TWO console actions: onboarding a clinic and
+      # rescuing a locked-out administrator. Both write `app_user`, which
+      # `emr_platform` deliberately cannot touch — an operator must not be able
+      # to enumerate a clinic's staff — and neither reads that table back.
+      #
+      # Comment this line out and both actions turn themselves off: onboarding
+      # becomes CLI-only (`provision.js`) and the console says so on its health
+      # page rather than failing at the point of use. That is a supported
+      # deployment, and the right one if the API host should never hold DDL.
+      MIGRATION_DATABASE_URL: postgres://${POSTGRES_USER:-emr_migrator}:${POSTGRES_PASSWORD:-emr_migrator}@postgres:5432/${POSTGRES_DB:-emr}
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env — see .env.example}
       # Encrypts each clinic's WhatsApp access token. Changing it makes every

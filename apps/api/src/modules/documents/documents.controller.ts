@@ -12,10 +12,12 @@ import {
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { CreateShareLink } from '@emr/contracts';
 import { Audit, Public, RequirePermission } from '../../common/http/decorators';
+import { RequiresFeature } from '../../common/features/feature.guard';
 import { parseBody, requireUuid } from '../../common/http/zod.pipe';
 import { ShareLinkService } from '../../common/storage/share-link.service';
 import { DocumentsService } from './documents.service';
 
+@RequiresFeature('documents')
 @Controller()
 export class DocumentsController {
   constructor(

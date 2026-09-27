@@ -2,6 +2,7 @@ import { Body, Controller, Get, HttpCode, Module, Param, Post } from '@nestjs/co
 import { z } from 'zod';
 
 import { Audit, RequirePermission, SkipAudit } from '../../common/http/decorators';
+import { RequiresFeature } from '../../common/features/feature.guard';
 import { parseBody } from '../../common/http/zod.pipe';
 import { WhatsAppClient } from './whatsapp.client';
 import { WhatsAppAccountService } from './whatsapp-account.service';
@@ -31,6 +32,7 @@ const ConnectWhatsApp = z.object({
   accessToken: z.string().trim().min(20, 'Enter the permanent access token'),
 });
 
+@RequiresFeature('whatsapp')
 @Controller('whatsapp')
 export class WhatsAppController {
   constructor(private readonly accounts: WhatsAppAccountService) {}
@@ -105,6 +107,7 @@ const CreateBroadcast = z.object({
  * from a reply: a mistake in one message reaches one person, and a mistake here
  * reaches the register.
  */
+@RequiresFeature('broadcasts')
 @Controller('broadcasts')
 export class BroadcastController {
   constructor(private readonly broadcasts: BroadcastService) {}

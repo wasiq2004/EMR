@@ -31,6 +31,17 @@ export type EventType =
   | 'message-status'
   | 'conversation-changed'
   | 'broadcast-progress'
+  /*
+   * Pharmacy.
+   *
+   * Identifiers only, like everything else on this pipe: a dispense record id
+   * and a status, never a drug name or a patient. The counter screen and the
+   * doctor's clarification card both refetch on receipt; the event says
+   * "something changed", not what.
+   */
+  | 'rx-queued'
+  | 'rx-dispensed'
+  | 'rx-clarification'
   | 'heartbeat';
 
 export interface DomainEvent {

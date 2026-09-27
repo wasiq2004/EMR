@@ -14,12 +14,17 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { InternalServerErrorException } from '@nestjs/common';
 
-export type UserRole =
-  | 'OWNER_ADMIN'
-  | 'DOCTOR'
-  | 'RECEPTIONIST'
-  | 'NURSE_ASSISTANT'
-  | 'AUDITOR';
+/*
+ * Re-exported from the contract, NOT re-declared here.
+ *
+ * This was a hand-written copy of the same five role names, and it drifted the
+ * moment two roles were added: the copy still said five, the database enum said
+ * seven, and the mismatch surfaced as a type error in the middleware rather than
+ * anywhere near this file. One definition, imported — the whole reason
+ * @emr/contracts exists.
+ */
+export type { UserRole } from '@emr/contracts';
+import type { UserRole } from '@emr/contracts';
 
 export interface TenantContextData {
   /** The tenant boundary. Sourced from the verified JWT, never from user input. */

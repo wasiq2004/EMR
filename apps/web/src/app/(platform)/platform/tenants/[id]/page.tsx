@@ -4,12 +4,15 @@ import * as React from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Pause, Play } from 'lucide-react';
+import { ArrowLeft, KeyRound, Pause, Play } from 'lucide-react';
 import { ApiError, api } from '@/lib/api-client';
 import { formatDate } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Field, Input } from '@/components/ui/field';
+import { FEATURES, resolveFeatures } from '@emr/contracts';
+import { usePlans } from '@/features/platform/api';
+import { FeaturesDialog, ResetAdminDialog } from '@/features/platform/tenant-dialogs';
 import { DataList, Panel, PanelBody, PanelHeader } from '@/components/ui/surface';
 import { Alert, Skeleton } from '@/components/ui/feedback';
 import { useToast } from '@/components/ui/toast';
@@ -20,6 +23,21 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+
+/** A row of the catalogue, as the picker needs it. */
+interface PlanOption {
+  id: string;
+  code: string;
+  name: string;
+  monthlyPricePaise: number;
+  maxPractitioners: number | null;
+  maxPatients: number | null;
+  includedMessagesPerMonth: number | null;
+  trialDays: number;
+  isActive: boolean;
+  featureCount: number;
+  featureTotal: number;
+}
 
 interface TenantDetail {
   clinic: {
@@ -38,7 +56,10 @@ interface TenantDetail {
     createdAt: string;
   };
   subscription: {
+    planId: string | null;
     plan: string;
+    /** Per-clinic overrides on top of the plan. Absent means "inherit everything". */
+    featureOverrides: Record<string, boolean>;
     status: string;
     monthlyPricePaise: number;
     maxPractitioners: number | null;
@@ -72,6 +93,8 @@ export default function TenantPage() {
 
   const [suspendOpen, setSuspendOpen] = React.useState(false);
   const [planOpen, setPlanOpen] = React.useState(false);
+  const [featuresOpen, setFeaturesOpen] = React.useState(false);
+  const [resetOpen, setResetOpen] = React.useState(false);
 
   const tenant = useQuery({
     queryKey: ['platform', 'tenant', clinicId],
@@ -114,17 +137,30 @@ export default function TenantPage() {
           </p>
         </div>
 
-        {clinic.isActive ? (
-          <Button variant="secondary" onClick={() => setSuspendOpen(true)}>
-            <Pause aria-hidden />
-            Suspend
+        <div className="flex flex-wrap gap-2">
+          {/*
+            Rescuing a locked-out administrator. PLATFORM_ADMIN only, and the server
+            refuses it for anyone else — the button is shown to everybody because
+            hiding it would leave a support operator wondering whether the capability
+            exists at all, and the refusal explains itself.
+          */}
+          <Button variant="secondary" onClick={() => setResetOpen(true)}>
+            <KeyRound aria-hidden />
+            Reset admin password
           </Button>
-        ) : (
-          <Button variant="primary" onClick={() => setSuspendOpen(true)}>
-            <Play aria-hidden />
-            Restore
-          </Button>
-        )}
+
+          {clinic.isActive ? (
+            <Button variant="secondary" onClick={() => setSuspendOpen(true)}>
+              <Pause aria-hidden />
+              Suspend
+            </Button>
+          ) : (
+            <Button variant="primary" onClick={() => setSuspendOpen(true)}>
+              <Play aria-hidden />
+              Restore
+            </Button>
+          )}
+        </div>
       </div>
 
       {!clinic.isActive ? (
@@ -159,6 +195,12 @@ export default function TenantPage() {
           />
         </PanelBody>
       </Panel>
+
+      <ModulesPanel
+        planId={subscription?.planId ?? null}
+        overrides={subscription?.featureOverrides ?? {}}
+        onEdit={() => setFeaturesOpen(true)}
+      />
 
       <Panel>
         <PanelHeader
@@ -291,7 +333,86 @@ export default function TenantPage() {
           refresh();
         }}
       />
+
+      <FeaturesDialog
+        open={featuresOpen}
+        onOpenChange={setFeaturesOpen}
+        clinicId={clinicId}
+        planId={subscription?.planId ?? null}
+        overrides={subscription?.featureOverrides ?? {}}
+        onDone={() => {
+          setFeaturesOpen(false);
+          refresh();
+        }}
+      />
+
+      <ResetAdminDialog
+        open={resetOpen}
+        onOpenChange={setResetOpen}
+        clinicId={clinicId}
+        clinicName={clinic.name}
+      />
     </div>
+  );
+}
+
+/**
+ * What this clinic can actually use.
+ *
+ * Shown as a read-only summary with one way in, rather than as live toggles on the
+ * page. Switching a module off takes it away from staff who may be mid-shift, so it
+ * belongs behind a dialog that asks why — not behind a checkbox somebody can knock
+ * with a trackpad.
+ */
+function ModulesPanel({
+  planId,
+  overrides,
+  onEdit,
+}: {
+  planId: string | null;
+  overrides: Record<string, boolean>;
+  onEdit: () => void;
+}) {
+  const plans = usePlans();
+  const plan = (plans.data ?? []).find((p) => p.id === planId) ?? null;
+  const effective = resolveFeatures(plan?.features ?? {}, overrides);
+  const overriddenCount = Object.keys(overrides).length;
+
+  return (
+    <Panel>
+      <PanelHeader
+        title="Modules"
+        description={
+          overriddenCount > 0
+            ? `${overriddenCount} set specifically for this clinic, the rest from its plan.`
+            : 'All inherited from the plan.'
+        }
+        actions={
+          <Button size="sm" variant="secondary" onClick={onEdit}>
+            Change modules
+          </Button>
+        }
+      />
+      <PanelBody>
+        <div className="flex flex-wrap gap-1.5">
+          {FEATURES.map((feature) => {
+            const on = effective[feature.key] === true;
+            const overridden = feature.key in overrides;
+            return (
+              <Badge key={feature.key} tone={on ? 'positive' : 'neutral'}>
+                {feature.label}
+                {overridden ? ' ·' : ''}
+              </Badge>
+            );
+          })}
+        </div>
+        {overriddenCount > 0 ? (
+          <p className="mt-2 text-2xs text-ink-faint">
+            A dot marks a module set for this clinic rather than inherited from the plan.
+          </p>
+        ) : null}
+      </PanelBody>
+    </Panel>
   );
 }
 
@@ -407,10 +528,22 @@ function PlanDialog({
   onDone: () => void;
 }) {
   const toast = useToast();
+
+  /*
+   * Only active plans are offered. A retired plan keeps working for the clinics
+   * already on it — that is what retiring means — but nobody new is put on one.
+   */
+  const plans = useQuery({
+    queryKey: ['platform', 'plans'],
+    queryFn: () => api.get<{ items: PlanOption[] }>('/platform/plans'),
+    enabled: open,
+    select: (data) => data.items.filter((item) => item.isActive),
+  });
+
   const [form, setForm] = React.useState({
-    plan: 'pilot',
+    planId: '',
     status: 'TRIAL',
-    rupees: '3000',
+    rupees: '',
     maxPatients: '',
     reason: '',
   });
@@ -418,18 +551,39 @@ function PlanDialog({
   React.useEffect(() => {
     if (!open) return;
     setForm({
-      plan: current?.plan ?? 'pilot',
+      planId: current?.planId ?? '',
       status: current?.status ?? 'TRIAL',
-      rupees: current ? String(current.monthlyPricePaise / 100) : '3000',
+      rupees: current ? String(current.monthlyPricePaise / 100) : '',
       maxPatients: current?.maxPatients ? String(current.maxPatients) : '',
       reason: '',
     });
   }, [open, current]);
 
+  const chosen = plans.data?.find((item) => item.id === form.planId);
+
+  /**
+   * Picking a plan fills the price in.
+   *
+   * It stays editable, because a negotiated price is a real thing and the
+   * console has to be able to record one. Showing the list price and letting
+   * someone change it is the difference between "what we charge for this" and
+   * "what we agreed with them".
+   */
+  const choosePlan = (planId: string) => {
+    const next = plans.data?.find((item) => item.id === planId);
+    setForm((f) => ({
+      ...f,
+      planId,
+      rupees: next ? String(next.monthlyPricePaise / 100) : f.rupees,
+      maxPatients: next?.maxPatients ? String(next.maxPatients) : '',
+      status: next && next.trialDays > 0 && !current ? 'TRIAL' : f.status,
+    }));
+  };
+
   const save = useMutation({
     mutationFn: () =>
       api.post(`/platform/tenants/${clinicId}/plan`, {
-        plan: form.plan,
+        planId: form.planId,
         status: form.status,
         // Entered in rupees, stored in paise. Money is never a float.
         monthlyPricePaise: Math.round(Number(form.rupees) * 100),
@@ -453,12 +607,37 @@ function PlanDialog({
           <DialogTitle>{current ? 'Change plan' : 'Set a plan'}</DialogTitle>
         </DialogHeader>
 
-        <Field label="Plan" htmlFor="plan-name" required>
-          <Input
+        <Field
+          label="Plan"
+          htmlFor="plan-name"
+          required
+          hint={
+            chosen
+              ? [
+                  chosen.maxPractitioners
+                    ? `${chosen.maxPractitioners} practitioners`
+                    : 'Unlimited practitioners',
+                  chosen.includedMessagesPerMonth
+                    ? `${chosen.includedMessagesPerMonth.toLocaleString('en-IN')} messages/month`
+                    : 'No messages included',
+                  `${chosen.featureCount} of ${chosen.featureTotal} modules`,
+                ].join(' · ')
+              : 'Edit the catalogue under Plans.'
+          }
+        >
+          <select
             id="plan-name"
-            value={form.plan}
-            onChange={(event) => set({ plan: event.target.value })}
-          />
+            value={form.planId}
+            onChange={(event) => choosePlan(event.target.value)}
+            className="h-9 w-full rounded-md border border-line-control bg-surface px-2 text-sm text-ink"
+          >
+            <option value="">Choose a plan…</option>
+            {(plans.data ?? []).map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name} — ₹{(item.monthlyPricePaise / 100).toLocaleString('en-IN')}/month
+              </option>
+            ))}
+          </select>
         </Field>
 
         <Field label="Status" htmlFor="plan-status" required>
@@ -515,7 +694,7 @@ function PlanDialog({
           </Button>
           <Button
             variant="primary"
-            disabled={form.reason.trim().length < 10}
+            disabled={form.reason.trim().length < 10 || !form.planId}
             loading={save.isPending}
             onClick={() => save.mutate()}
           >

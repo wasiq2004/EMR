@@ -1,10 +1,19 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+  forwardRef,
+} from '@nestjs/common';
 import { and, desc, eq } from 'drizzle-orm';
 import * as schema from '@emr/db/schema';
 import type { Encounter } from '@emr/contracts';
 import { TenantDb } from '../../common/tenancy/tenant-db.service';
 import { TenantContext } from '../../common/tenancy/tenant-context';
 import { AuditWriter } from '../../common/audit/audit.writer';
+import { FeatureGuard } from '../../common/features/feature.guard';
+import { DispensingService } from '../pharmacy/dispensing.service';
 
 /**
  * The clinical record.
@@ -19,6 +28,17 @@ export class ClinicalService {
   constructor(
     private readonly tenantDb: TenantDb,
     private readonly audit: AuditWriter,
+    private readonly features: FeatureGuard,
+    /**
+     * Forward-referenced.
+     *
+     * PharmacyModule exports DispensingService and does not import this module,
+     * so there is no cycle — but Nest resolves the two in an order that depends
+     * on registration, and `forwardRef` makes that irrelevant rather than
+     * fragile.
+     */
+    @Inject(forwardRef(() => DispensingService))
+    private readonly dispensing: DispensingService,
   ) {}
 
   /** Opens a consultation, or returns the draft already open for this patient. */
@@ -194,6 +214,23 @@ export class ClinicalService {
           .update(schema.appointment)
           .set({ status: 'FULFILLED', completedAt: new Date(), updatedBy: ctx.userId })
           .where(eq(schema.appointment.id, current.appointmentId));
+      }
+
+      /*
+       * The prescription reaches the pharmacy counter here, in this transaction.
+       *
+       * This is the blueprint's "zero re-entry" requirement, and the placement is
+       * the whole of it: a prescription cannot be signed without appearing at the
+       * counter, and cannot appear at the counter if the signing fails. A job
+       * that ran afterwards would leave both failure modes open.
+       *
+       * Conditional on the clinic having a pharmacy. Queueing at a clinic that
+       * only prescribes would build a queue nobody works, and switching the
+       * module on a year later would surface a thousand prescriptions apparently
+       * waiting since last March.
+       */
+      if (await this.features.clinicHas(ctx.clinicId, 'pharmacy')) {
+        await this.dispensing.enqueue(tx, id);
       }
 
       return finalised!;

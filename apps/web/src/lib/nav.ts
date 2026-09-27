@@ -1,5 +1,5 @@
 /**
- * Role-driven navigation — the four panels, expressed as data.
+ * Role-driven navigation — the six panels, expressed as data.
  *
  * Each item names the permission it needs, and the permission is checked
  * against the shared matrix in @emr/contracts. That means navigation cannot
@@ -26,6 +26,17 @@ import {
   UserRound,
   Users,
   Megaphone,
+  Boxes,
+  ClipboardCheck,
+  FlaskConical,
+  LineChart,
+  Microscope,
+  MessageCircleQuestion,
+  Pill,
+  ReceiptText,
+  ShoppingCart,
+  Truck,
+  TriangleAlert,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { Route } from 'next';
@@ -36,7 +47,26 @@ export type PanelId =
   | 'doctor'
   | 'nursing'
   | 'clinic-admin'
+  | 'pharmacy'
+  | 'analytics'
   | 'compliance';
+
+/**
+ * The live counts the sidebar can render.
+ *
+ * Declared once here and imported by both consumers. It was previously written out
+ * again in `sidebar.tsx`, which meant adding a pharmacy badge produced a type error
+ * in a component that had nothing to do with pharmacy.
+ */
+export type BadgeKey =
+  | 'inbox'
+  | 'tasks'
+  | 'queue'
+  | 'rxQueue'
+  | 'clarifications'
+  | 'stockAlerts';
+
+export type BadgeCounts = Partial<Record<BadgeKey, number>>;
 
 export interface NavItem {
   label: string;
@@ -47,7 +77,7 @@ export interface NavItem {
   /** Extra gate beyond the permission, e.g. merge is admin-only in practice. */
   roles?: UserRole[];
   /** Live count rendered as a badge, e.g. unread inbox. */
-  badgeKey?: 'inbox' | 'tasks' | 'queue';
+  badgeKey?: BadgeKey;
 }
 
 export interface NavSection {
@@ -69,6 +99,8 @@ export const PANEL_FOR_ROLE: Record<UserRole, PanelId> = {
   DOCTOR: 'doctor',
   NURSE_ASSISTANT: 'nursing',
   OWNER_ADMIN: 'clinic-admin',
+  PHARMACIST: 'pharmacy',
+  RESEARCH_ANALYST: 'analytics',
   AUDITOR: 'compliance',
 };
 
@@ -77,6 +109,8 @@ export const PANEL_LABEL: Record<PanelId, string> = {
   doctor: 'Doctor',
   nursing: 'Nursing',
   'clinic-admin': 'Clinic Admin',
+  pharmacy: 'Pharmacy',
+  analytics: 'Analytics',
   compliance: 'Compliance',
 };
 
@@ -232,10 +266,174 @@ const COMPLIANCE_SECTIONS: NavSection[] = [
   },
 ];
 
+/**
+ * The Pharmacy panel.
+ *
+ * Its own list for the same reason Compliance has one: a pharmacist must not be
+ * one permission change away from a consultation note appearing in their
+ * sidebar. The order is the counter's working day — the queue of prescriptions
+ * waiting is what a pharmacist opens the software to see.
+ */
+const PHARMACY_SECTIONS: NavSection[] = [
+  {
+    title: null,
+    items: [
+      {
+        label: 'Prescription queue',
+        href: '/pharmacy',
+        icon: Pill,
+        permission: 'dispense:read',
+        badgeKey: 'rxQueue',
+      },
+      {
+        label: 'Clarifications',
+        href: '/pharmacy/clarifications',
+        icon: MessageCircleQuestion,
+        permission: 'clarification:read',
+        badgeKey: 'clarifications',
+      },
+      {
+        label: 'Counter sale',
+        href: '/pharmacy/sales',
+        icon: ShoppingCart,
+        permission: 'pharmacySale:create',
+      },
+    ],
+  },
+  {
+    title: 'Stock',
+    items: [
+      {
+        label: 'Inventory',
+        href: '/pharmacy/stock',
+        icon: Boxes,
+        permission: 'stock:read',
+      },
+      {
+        label: 'Alerts',
+        href: '/pharmacy/alerts',
+        icon: TriangleAlert,
+        permission: 'stock:read',
+        badgeKey: 'stockAlerts',
+      },
+      {
+        label: 'Products',
+        href: '/pharmacy/products',
+        icon: ClipboardCheck,
+        permission: 'pharmacyProduct:read',
+      },
+    ],
+  },
+  {
+    title: 'Purchasing',
+    items: [
+      {
+        label: 'Purchase orders',
+        href: '/pharmacy/purchases',
+        icon: ReceiptText,
+        permission: 'purchaseOrder:read',
+      },
+      {
+        label: 'Suppliers',
+        href: '/pharmacy/suppliers',
+        icon: Truck,
+        permission: 'supplier:read',
+      },
+    ],
+  },
+  {
+    title: 'Review',
+    items: [
+      {
+        label: 'Pharmacy reports',
+        href: '/pharmacy/reports',
+        icon: Activity,
+        permission: 'report:read',
+      },
+      {
+        label: 'Tasks',
+        href: '/tasks',
+        icon: ClipboardList,
+        permission: 'task:read',
+        badgeKey: 'tasks',
+      },
+    ],
+  },
+];
+
+/**
+ * The Analytics panel.
+ *
+ * Every link here leads to counts, bands and codes. There is deliberately no
+ * patient search, no registry and no inbox — not hidden, absent, because the
+ * role holds no permission that would return a person.
+ */
+const ANALYTICS_SECTIONS: NavSection[] = [
+  {
+    title: null,
+    items: [
+      {
+        label: 'Overview',
+        href: '/analytics',
+        icon: LineChart,
+        permission: 'analytics:read',
+      },
+      {
+        label: 'Cohorts',
+        href: '/analytics/cohorts',
+        icon: Microscope,
+        permission: 'cohort:read',
+      },
+      {
+        label: 'Explorer',
+        href: '/analytics/explorer',
+        icon: Activity,
+        permission: 'analytics:read',
+      },
+    ],
+  },
+  {
+    title: 'Governance',
+    items: [
+      {
+        label: 'Data quality',
+        href: '/analytics/quality',
+        icon: FlaskConical,
+        permission: 'analytics:read',
+      },
+      {
+        label: 'Data dictionary',
+        href: '/analytics/dictionary',
+        icon: FileText,
+        permission: 'analytics:read',
+      },
+      {
+        label: 'Exports',
+        href: '/analytics/exports',
+        icon: ClipboardCheck,
+        permission: 'export:read',
+      },
+    ],
+  },
+];
+
 export function navigationFor(role: UserRole): NavSection[] {
   if (role === 'AUDITOR') return COMPLIANCE_SECTIONS;
+  if (role === 'PHARMACIST') return filterSections(PHARMACY_SECTIONS, role);
+  if (role === 'RESEARCH_ANALYST') return filterSections(ANALYTICS_SECTIONS, role);
 
-  return ALL_SECTIONS.map((section) => ({
+  return filterSections(ALL_SECTIONS, role);
+}
+
+/**
+ * Drops the links a role cannot use, and then the sections left empty.
+ *
+ * Applied to the panel-specific lists too, not only the clinic one. A clinic
+ * that has not bought purchasing still gets a Pharmacy panel — it just has no
+ * Purchasing section, rather than a section of links that 403.
+ */
+function filterSections(sections: NavSection[], role: UserRole): NavSection[] {
+  return sections.map((section) => ({
     title: section.title,
     items: section.items.filter((item) => {
       if (item.roles && !item.roles.includes(role)) return false;
@@ -247,6 +445,10 @@ export function navigationFor(role: UserRole): NavSection[] {
 /** The route a role should land on after signing in. */
 export function landingRouteFor(role: UserRole): Route {
   if (role === 'AUDITOR') return '/audit';
+  // Not '/today'. A pharmacist's day starts at the prescription queue and an
+  // analyst's at the overview; neither has a clinic dashboard to land on.
+  if (role === 'PHARMACIST') return '/pharmacy';
+  if (role === 'RESEARCH_ANALYST') return '/analytics';
   return '/today';
 }
 

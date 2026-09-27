@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import type { ReportSummary } from '@emr/contracts';
 import { TenantDb } from '../../common/tenancy/tenant-db.service';
 import { RequirePermission } from '../../common/http/decorators';
+import { RequiresFeature } from '../../common/features/feature.guard';
 
 /**
  * Reports.
@@ -84,6 +85,7 @@ export class ReportsService {
   }
 }
 
+@RequiresFeature('reports')
 @Controller('reports')
 class ReportsController {
   constructor(private readonly reports: ReportsService) {}

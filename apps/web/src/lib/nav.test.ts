@@ -24,6 +24,8 @@ const ROLES: UserRole[] = [
   'DOCTOR',
   'RECEPTIONIST',
   'NURSE_ASSISTANT',
+  'PHARMACIST',
+  'RESEARCH_ANALYST',
   'AUDITOR',
 ];
 
@@ -161,5 +163,153 @@ describe('no role is left without a home', () => {
 
   it.each(ROLES)('%s has a landing route', (role) => {
     expect(landingRouteFor(role)).toMatch(/^\//);
+  });
+});
+
+
+describe('the Pharmacy panel', () => {
+  const links = linksFor('PHARMACIST');
+  const hrefs = links.map((item) => item.href);
+
+  it('opens at the prescription queue, not the clinic dashboard', () => {
+    expect(landingRouteFor('PHARMACIST')).toBe('/pharmacy');
+    expect(PANEL_FOR_ROLE.PHARMACIST).toBe('pharmacy');
+  });
+
+  it('offers the counter its own working set', () => {
+    expect(hrefs).toContain('/pharmacy');
+    expect(hrefs).toContain('/pharmacy/clarifications');
+    expect(hrefs).toContain('/pharmacy/stock');
+    expect(hrefs).toContain('/pharmacy/alerts');
+  });
+
+  /*
+   * The boundary that matters. A pharmacist reads a patient's name, age and
+   * allergies from the queue row — enough to hand the right medicine to the right
+   * person — and must never be one permission change away from the consultation
+   * note or the registry appearing in their sidebar.
+   */
+  it('offers no route into a consultation, the registry, billing or the inbox', () => {
+    for (const item of links) {
+      for (const prefix of [
+        '/patients',
+        '/encounters',
+        '/billing',
+        '/inbox',
+        '/broadcasts',
+        '/queue',
+        '/appointments',
+        '/settings',
+        '/audit',
+        '/today',
+        '/analytics',
+      ]) {
+        expect(item.href.startsWith(prefix)).toBe(false);
+      }
+    }
+  });
+
+  it('cannot approve its own purchase orders by default', () => {
+    expect(can('PHARMACIST', 'purchaseOrder:create')).toBe(true);
+    expect(can('PHARMACIST', 'purchaseOrder:approve')).toBe(false);
+  });
+
+  it('can raise a clarification and cannot answer one', () => {
+    expect(can('PHARMACIST', 'clarification:create')).toBe(true);
+    expect(can('PHARMACIST', 'clarification:resolve')).toBe(false);
+    expect(can('DOCTOR', 'clarification:resolve')).toBe(true);
+  });
+
+  it('can never write a prescription', () => {
+    expect(can('PHARMACIST', 'prescription:read')).toBe(true);
+    expect(can('PHARMACIST', 'prescription:update')).toBe(false);
+    expect(can('PHARMACIST', 'prescription:create')).toBe(false);
+    expect(can('PHARMACIST', 'prescription:sign')).toBe(false);
+  });
+
+  it('cannot read the consultation note or the diagnosis', () => {
+    expect(can('PHARMACIST', 'encounterClinicalContent:read')).toBe(false);
+    expect(can('PHARMACIST', 'condition:read')).toBe(false);
+    expect(can('PHARMACIST', 'internalNote:read')).toBe(false);
+  });
+
+  it('can read the allergy list, because dispensing safely needs it', () => {
+    expect(can('PHARMACIST', 'allergy:read')).toBe(true);
+    expect(can('PHARMACIST', 'allergy:create')).toBe(false);
+  });
+});
+
+describe('the Analytics panel', () => {
+  const links = linksFor('RESEARCH_ANALYST');
+  const hrefs = links.map((item) => item.href);
+
+  it('opens at the overview', () => {
+    expect(landingRouteFor('RESEARCH_ANALYST')).toBe('/analytics');
+    expect(PANEL_FOR_ROLE.RESEARCH_ANALYST).toBe('analytics');
+  });
+
+  it('offers cohorts, the explorer, data quality and the dictionary', () => {
+    expect(hrefs).toContain('/analytics');
+    expect(hrefs).toContain('/analytics/cohorts');
+    expect(hrefs).toContain('/analytics/explorer');
+    expect(hrefs).toContain('/analytics/quality');
+    expect(hrefs).toContain('/analytics/dictionary');
+  });
+
+  it('offers no route that could reach an identifiable record', () => {
+    for (const item of links) {
+      for (const prefix of [
+        '/patients',
+        '/encounters',
+        '/inbox',
+        '/billing',
+        '/documents',
+        '/queue',
+        '/appointments',
+        '/pharmacy',
+        '/settings',
+        '/today',
+      ]) {
+        expect(item.href.startsWith(prefix)).toBe(false);
+      }
+    }
+  });
+
+  /*
+   * THE PRIVACY GUARANTEE, asserted rather than described.
+   *
+   * De-identification is not a mode this role can have switched off, because it
+   * holds no permission that returns a person. If any of these ever becomes true,
+   * the panel has stopped being a governed-analytics role and nobody will have
+   * noticed from looking at the screens.
+   */
+  it('holds no permission that returns identifying data', () => {
+    for (const permission of [
+      'patient:read',
+      'encounter:read',
+      'encounterClinicalContent:read',
+      'observation:read',
+      'condition:read',
+      'allergy:read',
+      'prescription:read',
+      'document:read',
+      'communication:read',
+      'invoice:read',
+      'auditEvent:read',
+    ] as const) {
+      expect(can('RESEARCH_ANALYST', permission)).toBe(false);
+    }
+  });
+
+  it('holds exactly the aggregate permissions it needs', () => {
+    expect(can('RESEARCH_ANALYST', 'analytics:read')).toBe(true);
+    expect(can('RESEARCH_ANALYST', 'cohort:create')).toBe(true);
+    expect(can('RESEARCH_ANALYST', 'export:create')).toBe(true);
+  });
+
+  it('does not grant analytics:read to anyone who should not aggregate', () => {
+    expect(can('RECEPTIONIST', 'analytics:read')).toBe(false);
+    expect(can('PHARMACIST', 'analytics:read')).toBe(false);
+    expect(can('AUDITOR', 'analytics:read')).toBe(false);
   });
 });

@@ -73,6 +73,10 @@ export const userRoleEnum = pgEnum('user_role', [
   'DOCTOR',
   'RECEPTIONIST',
   'NURSE_ASSISTANT',
+  /** Dispenses against a finalised prescription; never authors or alters one. */
+  'PHARMACIST',
+  /** Reads aggregates and cohorts. Holds no privilege that returns a person. */
+  'RESEARCH_ANALYST',
   'AUDITOR',
 ]);
 
@@ -198,6 +202,93 @@ export const subscriptionStatusEnum = pgEnum('subscription_status', [
 ]);
 
 /** FHIR Condition.clinicalStatus. */
+/* ------------------------------------------------------------------------- *
+ * Pharmacy
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Purchase order lifecycle.
+ *
+ * PARTIALLY_RECEIVED exists because it is the normal case, not an edge: a
+ * supplier short-ships, the clinic receives what came, and the order stays open
+ * for the rest. An order that could only be "open" or "closed" would force
+ * someone to either lie about what arrived or lose the outstanding quantity.
+ */
+export const purchaseOrderStatusEnum = pgEnum('purchase_order_status', [
+  'DRAFT',
+  'AWAITING_APPROVAL',
+  'PLACED',
+  'PARTIALLY_RECEIVED',
+  'RECEIVED',
+  'CANCELLED',
+]);
+
+/**
+ * Pharmacy fulfilment, per the blueprint's §15.4 state machine.
+ *
+ * CLARIFICATION_NEEDED is a state rather than a flag because the queue has to
+ * be sortable by it — "what is stuck waiting on a doctor" is the question a
+ * pharmacist asks most often after "what is next".
+ *
+ * PARTIAL is terminal-ish but reopenable: the patient took three of four
+ * medicines today and comes back for the fourth, and that is one dispense
+ * record with a second visit, not two records.
+ */
+export const dispenseStatusEnum = pgEnum('dispense_status', [
+  'PENDING',
+  'IN_PROGRESS',
+  'CLARIFICATION_NEEDED',
+  'READY',
+  'PARTIAL',
+  'DISPENSED',
+  'CANCELLED',
+]);
+
+/**
+ * Every reason stock can move.
+ *
+ * ONE LEDGER, not a table per reason. Receipts, dispensing, counter sales,
+ * returns, corrections and expiry write-offs are all a signed quantity against
+ * a batch with a reference to whatever caused it. The alternative — a
+ * `purchase_return` table, a `sale_return` table, an `adjustment` table —
+ * produces five places to look when the count is wrong and five chances for one
+ * of them to forget to move the balance.
+ */
+export const stockMovementTypeEnum = pgEnum('stock_movement_type', [
+  /** Opening count when a clinic starts using the module with stock on shelves. */
+  'OPENING_BALANCE',
+  'RECEIPT',
+  'DISPENSE',
+  'SALE',
+  'SALE_RETURN',
+  'PURCHASE_RETURN',
+  /** A correction after a physical count. Always carries a reason. */
+  'ADJUSTMENT',
+  'EXPIRY_WRITE_OFF',
+  'DAMAGE_WRITE_OFF',
+]);
+
+/**
+ * A question from the counter to the prescriber.
+ *
+ * WITHDRAWN rather than DELETED: a pharmacist who raised a query and then
+ * resolved it themselves (found the strength in stock after all) should leave
+ * the trace, because the next person to see that prescription needs to know it
+ * was queried.
+ */
+export const clarificationStatusEnum = pgEnum('clarification_status', [
+  'OPEN',
+  'ANSWERED',
+  'WITHDRAWN',
+]);
+
+/** Counter sale lifecycle. A return is its own row referencing the original. */
+export const pharmacySaleStatusEnum = pgEnum('pharmacy_sale_status', [
+  'DRAFT',
+  'COMPLETED',
+  'CANCELLED',
+]);
+
 export const conditionClinicalStatusEnum = pgEnum('condition_clinical_status', [
   'ACTIVE',
   'RECURRENCE',

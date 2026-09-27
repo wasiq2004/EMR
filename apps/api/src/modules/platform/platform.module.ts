@@ -20,6 +20,8 @@ import { SkipAudit } from '../../common/audit/audit.interceptor';
 import { parseBody, requireUuid } from '../../common/http/zod.pipe';
 import { PlatformService } from './platform.service';
 import { UsageAggregator } from './usage-aggregator.service';
+import { PlatformAdminService } from './platform-admin.service';
+import { PlatformSupportService } from './platform-support.service';
 import { platformDbProviders } from './platform-db.service';
 import {
   PLATFORM_COOKIE,
@@ -56,9 +58,22 @@ const StateChange = z.object({
 });
 
 const PlanChange = StateChange.extend({
-  plan: z.string().trim().min(1),
+  /**
+   * A catalogue id, not a name.
+   *
+   * The free-text version of this field is what let a clinic sit on a plan
+   * called "clinic " with a trailing space, matching nothing, features all off.
+   */
+  planId: z.string().uuid('Choose a plan from the catalogue'),
   status: z.enum(['TRIAL', 'ACTIVE', 'PAST_DUE', 'SUSPENDED', 'CANCELLED']),
-  monthlyPricePaise: z.number().int().min(0),
+
+  /*
+   * Everything below is an OVERRIDE, and omitting it means "whatever the plan
+   * says". That is why none of these are required: the ordinary case is a
+   * clinic on list terms, and the console should not make an operator retype
+   * five numbers to achieve it.
+   */
+  monthlyPricePaise: z.number().int().min(0).optional(),
   maxPractitioners: z.number().int().positive().nullable().optional(),
   maxPatients: z.number().int().positive().nullable().optional(),
   includedMessagesPerMonth: z.number().int().min(0).nullable().optional(),
@@ -66,11 +81,63 @@ const PlanChange = StateChange.extend({
   notes: z.string().nullable().optional(),
 });
 
+
+const FeatureMap = z.record(z.string(), z.boolean());
+
+const PlanInput = z.object({
+  id: z.string().uuid().optional(),
+  code: z
+    .string()
+    .trim()
+    .min(2)
+    .regex(/^[a-z0-9][a-z0-9-]*$/, 'Lower-case letters, digits and hyphens'),
+  name: z.string().trim().min(2),
+  description: z.string().nullable().optional(),
+  monthlyPricePaise: z.number().int().min(0),
+  annualPricePaise: z.number().int().min(0).nullable().optional(),
+  // Null is unlimited, which is a different thing from zero.
+  maxPractitioners: z.number().int().positive().nullable().optional(),
+  maxPatients: z.number().int().positive().nullable().optional(),
+  maxLocations: z.number().int().positive().nullable().optional(),
+  includedMessagesPerMonth: z.number().int().min(0).nullable().optional(),
+  storageGb: z.number().int().positive().nullable().optional(),
+  features: FeatureMap,
+  isActive: z.boolean().default(true),
+  isPrivate: z.boolean().default(false),
+  trialDays: z.number().int().min(0).default(0),
+  displayOrder: z.number().int().min(0).default(0),
+});
+
+const OperatorInput = z.object({
+  fullName: z.string().trim().min(2),
+  email: z.string().email(),
+  role: z.enum(['SUPPORT', 'OPERATOR', 'PLATFORM_ADMIN']),
+});
+
+const OnboardInput = z.object({
+  name: z.string().trim().min(2, 'Enter the clinic name'),
+  slug: z
+    .string()
+    .trim()
+    .min(3)
+    .regex(/^[a-z0-9][a-z0-9-]*[a-z0-9]$/, 'The slug is the subdomain: lower-case and hyphens'),
+  adminName: z.string().trim().min(2),
+  adminEmail: z.string().email(),
+  planId: z.string().uuid().nullable().optional(),
+  city: z.string().nullable().optional(),
+  state: z.string().nullable().optional(),
+  contactEmail: z.string().email().nullable().optional(),
+  contactPhoneE164: z.string().nullable().optional(),
+  timezone: z.string().optional(),
+});
+
 @Controller('platform')
 export class PlatformController {
   constructor(
     private readonly platform: PlatformService,
     private readonly usage: UsageAggregator,
+    private readonly admin: PlatformAdminService,
+    private readonly support: PlatformSupportService,
   ) {}
 
   /* ---- Session ---------------------------------------------------------- */
@@ -220,6 +287,180 @@ export class PlatformController {
     return this.usage.aggregateAll(body?.day);
   }
 
+
+  /* ---- The plan catalogue ------------------------------------------------ */
+
+  @Public()
+  @SkipAudit()
+  @UseGuards(PlatformGuard)
+  @RequirePlatformRole('SUPPORT')
+  @Get('plans')
+  async plans() {
+    return { items: await this.admin.plans() };
+  }
+
+  @Public()
+  @SkipAudit()
+  @UseGuards(PlatformGuard)
+  @RequirePlatformRole('OPERATOR')
+  @Post('plans')
+  savePlan(@Req() request: PlatformRequest, @Body() body: unknown) {
+    return this.admin.savePlan(request.platformActor!, parseBody(PlanInput, body));
+  }
+
+  @Public()
+  @SkipAudit()
+  @UseGuards(PlatformGuard)
+  @RequirePlatformRole('OPERATOR')
+  @Post('plans/:id/retire')
+  retirePlan(@Req() request: PlatformRequest, @Param('id') id: string) {
+    return this.admin.retirePlan(request.platformActor!, requireUuid(id, 'Plan'));
+  }
+
+  /* ---- Per-clinic features ------------------------------------------------ */
+
+  @Public()
+  @SkipAudit()
+  @UseGuards(PlatformGuard)
+  @RequirePlatformRole('OPERATOR')
+  @Post('tenants/:id/features')
+  setFeatures(@Req() request: PlatformRequest, @Param('id') id: string, @Body() body: unknown) {
+    const input = parseBody(StateChange.extend({ features: FeatureMap }), body);
+    return this.admin.setFeatureOverrides(
+      request.platformActor!,
+      requireUuid(id, 'Clinic'),
+      input.features,
+      input.reason,
+    );
+  }
+
+  /* ---- Onboarding and support -------------------------------------------- */
+
+  @Public()
+  @SkipAudit()
+  @UseGuards(PlatformGuard)
+  @RequirePlatformRole('OPERATOR')
+  @Post('tenants')
+  onboard(@Req() request: PlatformRequest, @Body() body: unknown) {
+    return this.support.onboardClinic(request.platformActor!, parseBody(OnboardInput, body));
+  }
+
+  /**
+   * Rescues a locked-out clinic administrator.
+   *
+   * PLATFORM_ADMIN only. It is the most sensitive thing in this console — it
+   * hands someone a working credential for a clinic — so it sits above the role
+   * that does day-to-day operations.
+   */
+  @Public()
+  @SkipAudit()
+  @UseGuards(PlatformGuard)
+  @RequirePlatformRole('PLATFORM_ADMIN')
+  @Post('tenants/:id/reset-admin-password')
+  resetClinicAdmin(
+    @Req() request: PlatformRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseBody(
+      StateChange.extend({ adminEmail: z.string().email() }),
+      body,
+    );
+    return this.support.resetClinicAdminPassword(
+      request.platformActor!,
+      requireUuid(id, 'Clinic'),
+      input.adminEmail,
+      input.reason,
+    );
+  }
+
+  /* ---- Operators ---------------------------------------------------------- */
+
+  @Public()
+  @SkipAudit()
+  @UseGuards(PlatformGuard)
+  @RequirePlatformRole('PLATFORM_ADMIN')
+  @Get('operators')
+  async operators() {
+    return { items: await this.admin.operators() };
+  }
+
+  @Public()
+  @SkipAudit()
+  @UseGuards(PlatformGuard)
+  @RequirePlatformRole('PLATFORM_ADMIN')
+  @Post('operators')
+  createOperator(@Req() request: PlatformRequest, @Body() body: unknown) {
+    return this.admin.createOperator(request.platformActor!, parseBody(OperatorInput, body));
+  }
+
+  @Public()
+  @SkipAudit()
+  @UseGuards(PlatformGuard)
+  @RequirePlatformRole('PLATFORM_ADMIN')
+  @Post('operators/:id')
+  updateOperator(
+    @Req() request: PlatformRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    const input = parseBody(
+      z.object({
+        role: z.enum(['SUPPORT', 'OPERATOR', 'PLATFORM_ADMIN']).optional(),
+        isActive: z.boolean().optional(),
+      }),
+      body,
+    );
+    return this.admin.updateOperator(request.platformActor!, requireUuid(id, 'Operator'), input);
+  }
+
+  @Public()
+  @SkipAudit()
+  @UseGuards(PlatformGuard)
+  @RequirePlatformRole('PLATFORM_ADMIN')
+  @Post('operators/:id/reset-password')
+  resetOperator(@Req() request: PlatformRequest, @Param('id') id: string) {
+    return this.admin.resetOperatorPassword(
+      request.platformActor!,
+      requireUuid(id, 'Operator'),
+    );
+  }
+
+  /* ---- Deployment settings ------------------------------------------------ */
+
+  @Public()
+  @SkipAudit()
+  @UseGuards(PlatformGuard)
+  @RequirePlatformRole('SUPPORT')
+  @Get('settings')
+  async settings() {
+    return { items: await this.admin.settings() };
+  }
+
+  @Public()
+  @SkipAudit()
+  @UseGuards(PlatformGuard)
+  @RequirePlatformRole('PLATFORM_ADMIN')
+  @Post('settings')
+  saveSetting(@Req() request: PlatformRequest, @Body() body: unknown) {
+    const input = parseBody(
+      z.object({ key: z.string().min(1), value: z.unknown() }),
+      body,
+    );
+    return this.admin.saveSetting(request.platformActor!, input.key, input.value);
+  }
+
+  /* ---- Monitoring ---------------------------------------------------------- */
+
+  @Public()
+  @SkipAudit()
+  @UseGuards(PlatformGuard)
+  @RequirePlatformRole('SUPPORT')
+  @Get('health')
+  health() {
+    return this.support.health();
+  }
+
   /* ---- What operators did ----------------------------------------------- */
 
   @Public()
@@ -238,7 +479,14 @@ export class PlatformController {
 
 @Module({
   controllers: [PlatformController],
-  providers: [...platformDbProviders, PlatformService, PlatformGuard, UsageAggregator],
+  providers: [
+    ...platformDbProviders,
+    PlatformService,
+    PlatformAdminService,
+    PlatformSupportService,
+    PlatformGuard,
+    UsageAggregator,
+  ],
   exports: [UsageAggregator],
 })
 export class PlatformModule {}

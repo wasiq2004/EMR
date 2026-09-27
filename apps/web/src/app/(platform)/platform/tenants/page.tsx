@@ -3,12 +3,14 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Search } from 'lucide-react';
+import { Plus, Search } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/field';
 import { Panel, PanelBody, PageHeader } from '@/components/ui/surface';
 import { Skeleton } from '@/components/ui/feedback';
+import { Button } from '@/components/ui/button';
+import { OnboardClinicDialog } from '@/features/platform/onboard-clinic-dialog';
 
 interface Tenant {
   id: string;
@@ -41,6 +43,7 @@ interface Tenant {
  */
 export default function TenantsPage() {
   const [term, setTerm] = React.useState('');
+  const [onboardOpen, setOnboardOpen] = React.useState(false);
 
   const tenants = useQuery({
     queryKey: ['platform', 'tenants'],
@@ -62,7 +65,18 @@ export default function TenantsPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <PageHeader title="Clinics" description={`${items.length} on this deployment.`} />
+      <PageHeader
+        title="Clinics"
+        description={`${items.length} on this deployment.`}
+        actions={
+          <Button variant="primary" onClick={() => setOnboardOpen(true)}>
+            <Plus aria-hidden />
+            Onboard a clinic
+          </Button>
+        }
+      />
+
+      <OnboardClinicDialog open={onboardOpen} onOpenChange={setOnboardOpen} />
 
       <div className="relative">
         <Search

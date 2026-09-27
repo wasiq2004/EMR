@@ -14,7 +14,15 @@ const Env = z.object({
 
   /** The API's own connection. This role is NOBYPASSRLS and holds no DDL. */
   DATABASE_URL: z.string().min(1),
-  /** Owner role, used only by the migration runner. */
+  /**
+   * Owner role. Used by the migration runner, and by exactly two console
+   * actions — onboarding a clinic and rescuing a locked-out administrator.
+   *
+   * Those two need it because `emr_platform` has no privilege on `app_user`,
+   * deliberately: an operator must not be able to enumerate a clinic's staff.
+   * Absent means both are CLI-only, which is a legitimate choice rather than
+   * an error.
+   */
   MIGRATION_DATABASE_URL: z.string().optional(),
 
   /**

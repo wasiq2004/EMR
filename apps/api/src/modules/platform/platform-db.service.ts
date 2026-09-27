@@ -1,4 +1,21 @@
 import { Inject, Injectable, type OnApplicationShutdown } from '@nestjs/common';
+/*
+ * THE ONE PLACE THIS IMPORT IS ALLOWED, and the exemption is narrow enough to state
+ * precisely.
+ *
+ * The lint rule sends every database access through `TenantDb`, because TenantDb is
+ * what sets `app.clinic_id` inside the transaction that pins the connection — and a
+ * clinic query that skips it returns zero rows under RLS, which looks like empty data
+ * rather than like a bug.
+ *
+ * None of that applies here. This is the operations console's own connection, as
+ * `emr_platform`: a BYPASSRLS role with no privilege on any clinical table. It has no
+ * tenant to set, it must aggregate across tenants on the handful of platform tables it
+ * can read, and routing it through TenantDb would give it a clinic scope it does not
+ * have. The boundary that protects patients here is the GRANT LIST in migration 0005,
+ * asserted on every deploy — not this rule.
+ */
+// eslint-disable-next-line no-restricted-imports
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import type { Pool } from 'pg';

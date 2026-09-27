@@ -4,7 +4,17 @@ import * as React from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Building2, LayoutDashboard, LogOut, ScrollText, ShieldAlert } from 'lucide-react';
+import {
+  Activity,
+  Building2,
+  LayoutDashboard,
+  Layers,
+  LogOut,
+  ScrollText,
+  Settings2,
+  ShieldAlert,
+  UserCog,
+} from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { cn } from '@/lib/cn';
 import { Providers } from '@/components/providers';
@@ -30,11 +40,50 @@ export interface Operator {
   role: 'SUPPORT' | 'OPERATOR' | 'PLATFORM_ADMIN';
 }
 
+/**
+ * The console's navigation.
+ *
+ * Ordered by how often an operator needs it, not by importance: Clinics is the
+ * working screen, Plans and Settings are set up once and revisited rarely, and the
+ * operator log is where you go when something has already happened.
+ *
+ * `minRole` mirrors the server's own requirement for each screen, so a SUPPORT
+ * operator is not shown a link that will refuse them. It is NOT the boundary — the
+ * platform guard denies by default and is the only thing that counts.
+ */
 const NAV = [
-  { href: '/platform', label: 'Overview', icon: LayoutDashboard, exact: true },
-  { href: '/platform/tenants', label: 'Clinics', icon: Building2, exact: false },
-  { href: '/platform/audit', label: 'Operator log', icon: ScrollText, exact: false },
+  { href: '/platform', label: 'Overview', icon: LayoutDashboard, exact: true, minRole: 'SUPPORT' },
+  { href: '/platform/tenants', label: 'Clinics', icon: Building2, exact: false, minRole: 'SUPPORT' },
+  { href: '/platform/plans', label: 'Plans', icon: Layers, exact: false, minRole: 'SUPPORT' },
+  { href: '/platform/health', label: 'Health', icon: Activity, exact: false, minRole: 'SUPPORT' },
+  {
+    href: '/platform/operators',
+    label: 'Operators',
+    icon: UserCog,
+    exact: false,
+    minRole: 'PLATFORM_ADMIN',
+  },
+  {
+    href: '/platform/settings',
+    label: 'Settings',
+    icon: Settings2,
+    exact: false,
+    minRole: 'SUPPORT',
+  },
+  {
+    href: '/platform/audit',
+    label: 'Operator log',
+    icon: ScrollText,
+    exact: false,
+    minRole: 'SUPPORT',
+  },
 ] as const;
+
+const RANK: Record<Operator['role'], number> = {
+  SUPPORT: 0,
+  OPERATOR: 1,
+  PLATFORM_ADMIN: 2,
+};
 
 export default function PlatformLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -104,7 +153,9 @@ function PlatformShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="flex-1 p-2" aria-label="Console">
-          {NAV.map((item) => {
+          {NAV.filter(
+            (item) => RANK[me.data.role] >= RANK[item.minRole as Operator['role']],
+          ).map((item) => {
             const active = item.exact
               ? pathname === item.href
               : pathname.startsWith(item.href);

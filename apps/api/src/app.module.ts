@@ -5,6 +5,7 @@ import { DatabaseModule } from './database/database.module';
 import { CommonModule } from './common/common.module';
 import { TenantContextMiddleware } from './common/tenancy/tenant-context.middleware';
 import { RbacGuard } from './common/rbac/rbac.guard';
+import { FeatureGuard } from './common/features/feature.guard';
 import { AuditInterceptor } from './common/audit/audit.interceptor';
 import { ProblemDetailsFilter } from './common/http/problem-details.filter';
 
@@ -23,6 +24,8 @@ import { BillingModule } from './modules/billing/billing.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { PharmacyModule } from './modules/pharmacy/pharmacy.module';
+import { ResearchModule } from './modules/research/research.module';
 import { PortabilityModule } from './modules/portability/portability.module';
 import { HealthModule } from './modules/health/health.module';
 import { NavModule } from './modules/nav/nav.module';
@@ -60,12 +63,33 @@ import { NavModule } from './modules/nav/nav.module';
     ReportsModule,
     SettingsModule,
     AuditModule,
+    PharmacyModule,
+    ResearchModule,
     PortabilityModule,
     HealthModule,
     NavModule,
   ],
   providers: [
+    /*
+     * `useClass` is correct here: RbacGuard holds no state beyond a logger, and
+     * it is not provided anywhere else for `useExisting` to point at. Contrast
+     * the feature guard below, which owns a cache.
+     */
     { provide: APP_GUARD, useClass: RbacGuard },
+    /*
+     * AFTER RbacGuard. Someone who is not permitted to broadcast should be told
+     * that, not that their plan lacks broadcasting — the second answer tells a
+     * receptionist something about the clinic's contract.
+     *
+     * `useExisting`, NOT `useClass`, and this is not a style choice. `useClass`
+     * makes Nest construct a SECOND instance under the APP_GUARD token, so the
+     * guard that decides requests and the guard the operations console calls
+     * `invalidate()` on are different objects holding different caches. The
+     * console would report a feature change saved, the clinic would keep its
+     * old features until the TTL lapsed, and the only symptom is a support call
+     * saying the upgrade did not work.
+     */
+    { provide: APP_GUARD, useExisting: FeatureGuard },
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
     { provide: APP_FILTER, useClass: ProblemDetailsFilter },
   ],

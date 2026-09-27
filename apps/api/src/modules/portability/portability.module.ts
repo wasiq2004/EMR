@@ -4,6 +4,7 @@ import * as schema from '@emr/db/schema';
 import { TenantDb } from '../../common/tenancy/tenant-db.service';
 import { TenantContext } from '../../common/tenancy/tenant-context';
 import { Audit, RequirePermission } from '../../common/http/decorators';
+import { RequiresFeature } from '../../common/features/feature.guard';
 
 /**
  * Import and export.
@@ -62,6 +63,7 @@ export class PortabilityService {
   }
 }
 
+@RequiresFeature('dataPortability')
 @Controller()
 class PortabilityController {
   constructor(private readonly portability: PortabilityService) {}

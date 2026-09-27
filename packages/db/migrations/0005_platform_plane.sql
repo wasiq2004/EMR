@@ -136,7 +136,12 @@ BEGIN
       'subscription',
       'clinic_usage_daily',
       'platform_user',
-      'platform_audit_event'
+      'platform_audit_event',
+      -- Added by 0006, which grants them and restates this whole assertion.
+      -- Listed here too so this file stays readable as the boundary in one
+      -- place; it runs before those grants exist, so it is a no-op here.
+      'plan',
+      'platform_setting'
     );
 
   IF leaked IS NOT NULL THEN

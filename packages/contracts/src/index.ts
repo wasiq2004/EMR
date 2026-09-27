@@ -9,6 +9,7 @@
 export * from './common';
 export * from './enums';
 export * from './rbac';
+export * from './features';
 export * from './patient';
 export * from './scheduling';
 export * from './clinical';
@@ -16,3 +17,5 @@ export * from './drug-classes';
 export * from './comms';
 export * from './billing';
 export * from './ops';
+export * from './pharmacy';
+export * from './research';

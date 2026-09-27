@@ -12,6 +12,7 @@ import { useSession } from '@/lib/session';
 import { initials } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { Sidebar } from './sidebar';
+import type { BadgeCounts } from '@/lib/nav';
 import { Omnibox } from './omnibox';
 import { OfflineBanner } from './offline-banner';
 
@@ -35,7 +36,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { data: counts } = useQuery({
     queryKey: ['nav-counts'],
     queryFn: () =>
-      api.get<{ inbox: number; tasks: number; queue: number }>('/nav/counts'),
+      api.get<BadgeCounts>('/nav/counts'),
     refetchInterval: 30_000,
     staleTime: 15_000,
   });

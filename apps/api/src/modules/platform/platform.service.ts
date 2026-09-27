@@ -12,6 +12,7 @@ import { PlatformDbService } from './platform-db.service';
 import { PasswordService } from '../../common/auth/password.service';
 import { TokenService } from '../../common/auth/token.service';
 import type { PlatformActor } from './platform.guard';
+import { FeatureGuard } from '../../common/features/feature.guard';
 
 /**
  * What a platform operator can see and do.
@@ -34,6 +35,12 @@ export class PlatformService {
     private readonly platform: PlatformDbService,
     private readonly passwords: PasswordService,
     private readonly tokens: TokenService,
+    /**
+     * Held only to drop a clinic's cached feature set when its plan changes.
+     * Injecting the guard reads oddly; the cache lives there because that is
+     * where it is read, and a second holder of the same map would be worse.
+     */
+    private readonly features: FeatureGuard,
   ) {}
 
   /* ---- Sign-in ---------------------------------------------------------- */
@@ -214,8 +221,12 @@ export class PlatformService {
       },
       subscription: plan
         ? {
+            // The catalogue row it points at, so the console can preselect the
+            // plan rather than make an operator identify it by price.
+            planId: plan.planId,
             plan: plan.plan,
             status: plan.status,
+            featureOverrides: plan.featureOverrides,
             monthlyPricePaise: plan.monthlyPricePaise,
             maxPractitioners: plan.maxPractitioners,
             maxPatients: plan.maxPatients,
@@ -328,14 +339,29 @@ export class PlatformService {
     return { restored: true };
   }
 
-  /** Creates or changes a clinic's plan. */
+  /**
+   * Puts a clinic on a plan.
+   *
+   * `planId` REFERENCES THE CATALOGUE, and that is the whole point of this
+   * method rather than a detail of it. Before the catalogue existed this took a
+   * free-text plan name, which meant two things were wrong: the name was
+   * retyped per clinic and drifted, and nothing connected the clinic to a
+   * FEATURE SET — so every gated feature stayed off no matter what plan the
+   * clinic was sold.
+   *
+   * Price and limits are COPIED from the plan rather than read through it. A
+   * clinic keeps what it was sold: raising the list price of `clinic` next year
+   * must not silently reprice everyone already on it. The copy is the contract;
+   * the plan is the template. Any field passed explicitly overrides the copy,
+   * which is how a negotiated price is recorded.
+   */
   async setPlan(
     actor: PlatformActor,
     clinicId: string,
     input: {
-      plan: string;
+      planId: string;
       status: 'TRIAL' | 'ACTIVE' | 'PAST_DUE' | 'SUSPENDED' | 'CANCELLED';
-      monthlyPricePaise: number;
+      monthlyPricePaise?: number;
       maxPractitioners?: number | null;
       maxPatients?: number | null;
       includedMessagesPerMonth?: number | null;
@@ -346,21 +372,44 @@ export class PlatformService {
   ) {
     const clinic = await this.requireClinic(clinicId);
 
+    const [plan] = await this.platform.db
+      .select()
+      .from(schema.plan)
+      .where(eq(schema.plan.id, input.planId))
+      .limit(1);
+
+    if (!plan) throw new NotFoundException('That plan is not in the catalogue.');
+
     const [existing] = await this.platform.db
       .select()
       .from(schema.subscription)
       .where(eq(schema.subscription.clinicId, clinicId))
       .limit(1);
 
+    // `undefined` means "take the plan's value"; an explicit null means
+    // "unlimited". They are different answers and the ?? chain keeps them so.
+    const pick = <T>(given: T | undefined, fromPlan: T): T =>
+      given === undefined ? fromPlan : given;
+
     const values = {
       clinicId,
-      plan: input.plan,
+      planId: plan.id,
+      // Kept alongside planId: the audit trail and old invoices refer to a plan
+      // by name, and that has to still read correctly after a plan is renamed.
+      plan: plan.code,
       status: input.status,
-      monthlyPricePaise: input.monthlyPricePaise,
-      maxPractitioners: input.maxPractitioners ?? null,
-      maxPatients: input.maxPatients ?? null,
-      includedMessagesPerMonth: input.includedMessagesPerMonth ?? null,
-      trialEndsAt: input.trialEndsAt ? new Date(input.trialEndsAt) : null,
+      monthlyPricePaise: pick(input.monthlyPricePaise, plan.monthlyPricePaise),
+      maxPractitioners: pick(input.maxPractitioners, plan.maxPractitioners),
+      maxPatients: pick(input.maxPatients, plan.maxPatients),
+      includedMessagesPerMonth: pick(
+        input.includedMessagesPerMonth,
+        plan.includedMessagesPerMonth,
+      ),
+      trialEndsAt: input.trialEndsAt
+        ? new Date(input.trialEndsAt)
+        : input.status === 'TRIAL' && plan.trialDays > 0
+          ? new Date(Date.now() + plan.trialDays * 86_400_000)
+          : null,
       notes: input.notes ?? null,
     };
 
@@ -388,6 +437,11 @@ export class PlatformService {
         to: { plan: values.plan, status: values.status, monthlyPricePaise: values.monthlyPricePaise },
       },
     });
+
+    // The feature set just changed. Without this the clinic keeps its old flags
+    // for up to the cache TTL — which reads as "the upgrade did not work" to
+    // whoever is on the phone asking why.
+    this.features.invalidate(clinicId);
 
     return { saved: true };
   }

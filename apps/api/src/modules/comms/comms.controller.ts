@@ -1,8 +1,10 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { Audit, RequirePermission } from '../../common/http/decorators';
+import { RequiresFeature } from '../../common/features/feature.guard';
 import { requireUuid } from '../../common/http/zod.pipe';
 import { CommsService } from './comms.service';
 
+@RequiresFeature('whatsapp')
 @Controller()
 export class CommsController {
   constructor(private readonly comms: CommsService) {}

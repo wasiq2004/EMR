@@ -108,8 +108,27 @@ export const subscription = pgTable(
     id: primaryKeyColumn(),
     clinicId: uuid('clinic_id').notNull(),
 
+    /**
+     * The catalogue plan. Null only for a clinic created before the catalogue
+     * existed, or one on a bespoke arrangement recorded in `notes`.
+     */
+    planId: uuid('plan_id'),
+    /** The plan CODE at the time it was assigned. History, not a foreign key. */
     plan: text('plan').notNull().default('pilot'),
     status: subscriptionStatusEnum('status').notNull().default('TRIAL'),
+
+    /**
+     * Per-clinic exceptions to the plan's features.
+     *
+     * Separate from the plan so that turning something on for one clinic — a
+     * pilot, a complaint, a trial of a new module — does not quietly change it
+     * for everyone else on that plan, which is exactly what editing the plan
+     * would do.
+     */
+    featureOverrides: jsonb('feature_overrides')
+      .$type<Record<string, boolean>>()
+      .notNull()
+      .default({}),
 
     /** Paise, so money is never a float. */
     monthlyPricePaise: integer('monthly_price_paise').notNull().default(0),
@@ -240,4 +259,87 @@ export const platformAuditEvent = pgTable(
     index('platform_audit_clinic_idx').on(t.targetClinicId, t.occurredAt),
     index('platform_audit_actor_idx').on(t.actorPlatformUserId, t.occurredAt),
   ],
+);
+
+/* ------------------------------------------------------------------------- *
+ * Plan catalogue
+ *
+ * The plan was a free-text string on the subscription, which meant every price
+ * change was retyped per clinic and two clinics on "pilot" could quietly have
+ * different limits. A plan is a thing the business sells; it belongs in one
+ * place, defined once, and assigned.
+ *
+ * FEATURES LIVE HERE, AND THEY ARE ENFORCED. `features` is not a display hint
+ * for the console — the clinic API reads the effective set on every request and
+ * refuses a disabled module. A flag that only greys out a menu is a flag that
+ * is off in the interface and on in the API.
+ * ------------------------------------------------------------------------- */
+
+export const plan = pgTable(
+  'plan',
+  {
+    id: primaryKeyColumn(),
+
+    /** Stable identifier, e.g. `pilot`. Referenced in contracts and invoices. */
+    code: text('code').notNull(),
+    name: text('name').notNull(),
+    description: text('description'),
+
+    monthlyPricePaise: integer('monthly_price_paise').notNull().default(0),
+    /** Blank means the plan is not sold annually. */
+    annualPricePaise: integer('annual_price_paise'),
+
+    /* Limits. Null means unlimited, which is different from zero. */
+    maxPractitioners: integer('max_practitioners'),
+    maxPatients: integer('max_patients'),
+    maxLocations: integer('max_locations'),
+    includedMessagesPerMonth: integer('included_messages_per_month'),
+    storageGb: integer('storage_gb'),
+
+    /**
+     * Which modules a clinic on this plan may use.
+     *
+     * `{ "broadcasts": true, "teleconsultation": false, ... }`. Absent means
+     * off: a feature added next month is disabled for every existing plan until
+     * someone decides otherwise, which is the safe direction for a change
+     * nobody has reviewed.
+     */
+    features: jsonb('features').$type<Record<string, boolean>>().notNull().default({}),
+
+    /** Offered to new clinics. An inactive plan keeps working for whoever is on it. */
+    isActive: boolean('is_active').notNull().default(true),
+    /** Not offered publicly — negotiated, bespoke, or grandfathered. */
+    isPrivate: boolean('is_private').notNull().default(false),
+    trialDays: integer('trial_days').notNull().default(0),
+    displayOrder: integer('display_order').notNull().default(0),
+
+    ...auditColumns(),
+  },
+  (t) => [uniqueIndex('plan_code_uq').on(t.code)],
+);
+
+/* ------------------------------------------------------------------------- *
+ * Platform settings
+ *
+ * Deployment-wide configuration an operator can change without a release:
+ * the default plan for a new clinic, the trial length, the message price used
+ * to estimate a clinic's bill.
+ *
+ * Key/value rather than columns, because the alternative is a migration every
+ * time the business wants to change one number — and a setting that needs a
+ * deploy is a setting nobody changes.
+ * ------------------------------------------------------------------------- */
+
+export const platformSetting = pgTable(
+  'platform_setting',
+  {
+    key: text('key').primaryKey(),
+    value: jsonb('value').notNull(),
+    /** What it does, shown beside the field so the console is self-describing. */
+    description: text('description'),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+    updatedBy: uuid('updated_by'),
+  },
 );

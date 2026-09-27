@@ -8,6 +8,7 @@ import { DraftInvoice, RecordPayment, computeInvoiceTotals, type Invoice } from 
 import { TenantDb } from '../../common/tenancy/tenant-db.service';
 import { TenantContext } from '../../common/tenancy/tenant-context';
 import { Audit, RequirePermission } from '../../common/http/decorators';
+import { RequiresFeature } from '../../common/features/feature.guard';
 import { parseBody, requireUuid } from '../../common/http/zod.pipe';
 
 /**
@@ -224,6 +225,7 @@ function serialise(row: typeof schema.invoice.$inferSelect, patientName: string)
   } as unknown as Invoice;
 }
 
+@RequiresFeature('billing')
 @Controller('invoices')
 class BillingController {
   constructor(private readonly billing: BillingService) {}

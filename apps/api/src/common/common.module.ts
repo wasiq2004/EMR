@@ -11,6 +11,7 @@ import { TokenRevocationCache } from './auth/token-revocation.cache';
 import { OtpService } from './auth/otp.service';
 import { SecretBoxService } from './crypto/secret-box.service';
 import { EventHub } from './events/event-hub.service';
+import { FeatureGuard } from './features/feature.guard';
 
 /**
  * Cross-cutting infrastructure.
@@ -45,6 +46,7 @@ import { EventHub } from './events/event-hub.service';
     OtpService,
     SecretBoxService,
     EventHub,
+    FeatureGuard,
   ],
   exports: [
     ClinicStatusCache,
@@ -58,6 +60,7 @@ import { EventHub } from './events/event-hub.service';
     OtpService,
     SecretBoxService,
     EventHub,
+    FeatureGuard,
   ],
 })
 export class CommonModule {}

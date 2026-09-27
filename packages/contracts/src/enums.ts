@@ -14,6 +14,23 @@ export const UserRole = z.enum([
   'DOCTOR',
   'RECEPTIONIST',
   'NURSE_ASSISTANT',
+  /**
+   * Dispenses against a finalised prescription and runs the medicine counter.
+   *
+   * NOT a prescriber and not a diagnostician: a pharmacist may read the
+   * medication a doctor ordered and record what was handed over, and may never
+   * alter the order. Where the two disagree, the mechanism is a clarification
+   * back to the prescriber, which is a record rather than a phone call.
+   */
+  'PHARMACIST',
+  /**
+   * Analyses the clinic's own data without seeing whose it is.
+   *
+   * De-identified by construction: this role holds no `patient:read`, so there
+   * is no endpoint it can call that returns a name, a phone number or an MRN.
+   * Cohorts are described by age band and code, never by person.
+   */
+  'RESEARCH_ANALYST',
   'AUDITOR',
 ]);
 export type UserRole = z.infer<typeof UserRole>;
@@ -197,6 +214,11 @@ export const ROLE_LABEL: Record<UserRole, string> = {
   DOCTOR: 'Doctor',
   RECEPTIONIST: 'Receptionist',
   NURSE_ASSISTANT: 'Nurse',
+  PHARMACIST: 'Pharmacist',
+  // "Analyst", not "Research Analyst". The person doing this at a five-doctor
+  // clinic is the practice manager on a Friday afternoon, and nobody wants a
+  // job title they have to live up to printed in the corner of the screen.
+  RESEARCH_ANALYST: 'Analyst',
   AUDITOR: 'Auditor',
 };
 
