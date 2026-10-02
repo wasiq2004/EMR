@@ -48,6 +48,7 @@ export const AppointmentStatus = z.enum([
   'ARRIVED',
   'IN_PROGRESS',
   'FULFILLED',
+  'CHECKED_OUT',
   'CANCELLED',
   'NOSHOW',
 ]);
@@ -227,7 +228,8 @@ export const APPOINTMENT_STATUS_LABEL: Record<AppointmentStatus, string> = {
   CONFIRMED: 'Confirmed',
   ARRIVED: 'Waiting',
   IN_PROGRESS: 'In consultation',
-  FULFILLED: 'Completed',
+  FULFILLED: 'Consultation done',
+  CHECKED_OUT: 'Checked out',
   CANCELLED: 'Cancelled',
   NOSHOW: 'No-show',
 };

@@ -4,10 +4,24 @@
 --
 -- Drizzle created fifteen tables and gave each one ENABLE ROW LEVEL SECURITY and
 -- a tenant policy. That is not enough, and the gap is the one `0001` exists to
--- close: ENABLE does not apply to the table's OWNER, so without FORCE every one
+-- close: ENABLE does not apply to the table's OWNER, and FORCE makes it apply.
+-- `0001` forced RLS on the tables that existed when it ran; this file does the
+-- same for the ones that did not.
+--
+-- CORRECTION, 2026-10-03. This paragraph used to end "so without FORCE every one
 -- of these tables is readable across tenants by anything connected as
--- `emr_migrator`. `0001` forced RLS on the tables that existed when it ran; this
--- file does the same for the ones that did not.
+-- `emr_migrator`", which overstates what FORCE buys. `emr_migrator` is a
+-- SUPERUSER on this deployment, and superusers — like any role with BYPASSRLS —
+-- bypass row-level security unconditionally, forced or not. It reads across
+-- tenants whichever way this flag is set.
+--
+-- FORCE is still right to set, for two reasons that do not depend on
+-- constraining the migrator: the application connects as `emr_app`, which is
+-- NOBYPASSRLS and is the role every request runs under; and if ownership is ever
+-- moved to a non-superuser — the correct production posture — FORCE is what
+-- makes the boundary hold, so setting it now turns that into a one-line ALTER
+-- rather than an audit. The protection against a cross-tenant read is the GRANT
+-- LIST plus the fact that nothing serving traffic connects as the migrator.
 --
 -- It also adds the two guarantees specific to this module:
 --
@@ -159,57 +173,18 @@ CREATE TRIGGER stock_movement_no_change
 -- 5. A finalised prescription stays finalised
 -- ---------------------------------------------------------------------------
 --
--- The pharmacy reads `medication_request` and must never write it. That is
--- enforced in the API by the permission matrix — PHARMACIST holds
--- `prescription:read` and not `:update` — and the matrix is the real control.
+-- Already enforced. `0001_roles_and_rls.sql` attaches
+-- `medication_request_finalized_immutable`, which freezes every column of a
+-- prescription on a finalised encounter except its status.
 --
--- This is the second line: the pharmacist's connection is the same `emr_app`
--- role as everyone else's, so a defect in a pharmacy handler could in principle
--- issue the UPDATE that the permission matrix intended to prevent. A trigger
--- cannot distinguish which HTTP route it was called from, so the narrow, honest
--- version of the guarantee is what can actually be asserted: once an encounter
--- is FINISHED, the clinical fields of its prescriptions are immutable for
--- everyone, and the amendment flow already creates a new version rather than
--- editing the old one.
-CREATE OR REPLACE FUNCTION medication_request_finalised_is_immutable()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-DECLARE
-  parent_status encounter_status;
-BEGIN
-  SELECT status INTO parent_status FROM encounter WHERE id = OLD.encounter_id;
-
-  IF parent_status IS DISTINCT FROM 'FINISHED' THEN
-    RETURN NEW;
-  END IF;
-
-  -- The clinical substance of the order. Deliberately NOT every column: `status`
-  -- moves legitimately after finalisation (a course is STOPPED or COMPLETED),
-  -- and the audit columns move on every write.
-  IF NEW.drug_display_name  IS DISTINCT FROM OLD.drug_display_name
-     OR NEW.molecule_name    IS DISTINCT FROM OLD.molecule_name
-     OR NEW.strength         IS DISTINCT FROM OLD.strength
-     OR NEW.dosage_form      IS DISTINCT FROM OLD.dosage_form
-     OR NEW.route            IS DISTINCT FROM OLD.route
-     OR NEW.frequency        IS DISTINCT FROM OLD.frequency
-     OR NEW.duration_days    IS DISTINCT FROM OLD.duration_days
-     OR NEW.quantity         IS DISTINCT FROM OLD.quantity
-     OR NEW.instructions     IS DISTINCT FROM OLD.instructions
-     OR NEW.catalogue_item_id IS DISTINCT FROM OLD.catalogue_item_id
-  THEN
-    RAISE EXCEPTION
-      'A prescription on a finalised encounter cannot be altered. Amend the encounter, which creates a new version, or raise a clarification.';
-  END IF;
-
-  RETURN NEW;
-END;
-$$;
-
-DROP TRIGGER IF EXISTS medication_request_finalised_immutable ON public.medication_request;
-CREATE TRIGGER medication_request_finalised_immutable
-  BEFORE UPDATE ON public.medication_request
-  FOR EACH ROW EXECUTE FUNCTION medication_request_finalised_is_immutable();
+-- This file originally added a second, narrower guard for the pharmacy module.
+-- That was redundant — the existing one already covers every write path,
+-- including the pharmacy's — and narrower, because it listed columns by hand
+-- rather than diffing the row. `0008` removes it. The rule lives in one place.
+--
+-- The pharmacy module additionally holds no `prescription:update` permission and
+-- exposes no route that writes `medication_request`, so the database guard is
+-- the third line of defence here rather than the first.
 
 -- ---------------------------------------------------------------------------
 -- 6. The tenancy assertion, re-run

@@ -55,7 +55,20 @@ export class ApiError extends Error {
 export interface RequestOptions {
   /** Row version for optimistic concurrency, sent as If-Match. */
   version?: number;
-  /** Required for any request that dispatches or charges. */
+  /**
+   * Sent as an `Idempotency-Key` header.
+   *
+   * THE SERVER DOES NOT READ THIS HEADER. It is kept because it is the standard
+   * place for the value and it reaches request logs, but passing it here buys no
+   * protection on its own.
+   *
+   * Where a route genuinely must not be applied twice, the key goes in the
+   * REQUEST BODY, because that is where its contract requires it and where a
+   * unique index can enforce it — see `RecordPayment` and migration
+   * `0010_payment_idempotency.sql`. The payment screen passed it only here, and
+   * every payment it submitted failed validation with a 422 for months while
+   * looking, from this file, fully protected.
+   */
   idempotencyKey?: string;
   signal?: AbortSignal;
   /** Query string values; null and undefined are dropped. */
@@ -115,11 +128,56 @@ function friendlyFallback(status: number): string {
   }
 }
 
+/**
+ * Refreshing the session, once, for everybody.
+ *
+ * THE BUG THIS FIXES. The access token lives ten minutes. `POST /auth/refresh`
+ * existed on the server, rotated the opaque refresh token correctly, and was
+ * called by NOTHING — so every user was signed out mid-consultation every ten
+ * minutes, and the refresh machinery was dead code. It reads as "the app keeps
+ * logging me out", which sounds like a session bug rather than a missing call.
+ *
+ * A SINGLE IN-FLIGHT PROMISE, shared by every caller. A clinic screen fires
+ * several queries at once; without this, ten of them would each get a 401 and
+ * each POST its own refresh. The server ROTATES the refresh token on use, so the
+ * first would succeed and the other nine would present a token that had just been
+ * invalidated — which is indistinguishable from theft and correctly kills the
+ * session. Coalescing is not an optimisation here; it is what makes refresh work
+ * at all.
+ */
+let refreshInFlight: Promise<boolean> | null = null;
+
+function refreshSession(): Promise<boolean> {
+  refreshInFlight ??= (async () => {
+    try {
+      const response = await fetch(buildUrl('/auth/refresh'), {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+      });
+      return response.ok;
+    } catch {
+      // Offline. Not a dead session — the caller reports the connection instead.
+      return false;
+    } finally {
+      // Cleared in a microtask so concurrent callers awaiting this same promise
+      // all observe the result before the next attempt can start.
+      queueMicrotask(() => {
+        refreshInFlight = null;
+      });
+    }
+  })();
+
+  return refreshInFlight;
+}
+
 async function request<T>(
   method: string,
   path: string,
   body: unknown,
   options: RequestOptions = {},
+  /** Set on the one retry after a refresh, so a dead session cannot loop. */
+  isRetry = false,
 ): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -146,6 +204,25 @@ async function request<T>(
     });
   }
 
+  /*
+   * A 401 means the access token expired. Refresh once and replay.
+   *
+   * Deliberately NOT attempted for the auth endpoints themselves: a failed
+   * sign-in returns 401 too, and refreshing on it would turn a wrong password
+   * into a confusing loop. Nor on a retry, so a genuinely dead session surfaces
+   * as "sign in again" rather than as two requests and then the same message.
+   */
+  if (
+    response.status === 401 &&
+    !isRetry &&
+    !path.startsWith('/auth/') &&
+    !path.startsWith('/platform/auth/')
+  ) {
+    if (await refreshSession()) {
+      return request<T>(method, path, body, options, true);
+    }
+  }
+
   if (response.status === 204) return undefined as T;
   if (!response.ok) throw new ApiError(await toProblem(response));
 
@@ -166,7 +243,15 @@ export const api = {
     request<T>('DELETE', path, undefined, options),
 };
 
-/** Stable key for an operation that must not be applied twice. */
+/**
+ * A key for an operation that must not be applied twice.
+ *
+ * Call this ONCE per operation the user is performing and hold on to the result
+ * — a ref, or component state — then send the same value on every attempt. A
+ * key generated inside a `mutationFn` is minted afresh on each retry, so the
+ * server sees two distinct operations and applies both, which is the failure the
+ * key exists to prevent.
+ */
 export function idempotencyKey(): string {
   return globalThis.crypto.randomUUID();
 }

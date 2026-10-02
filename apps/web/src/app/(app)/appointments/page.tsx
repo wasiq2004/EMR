@@ -3,18 +3,21 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { CalendarDays, CalendarPlus } from 'lucide-react';
+import { CalendarDays, CalendarPlus, LogIn } from 'lucide-react';
 import {
+  ALLOWED_STATUS_TRANSITIONS,
   APPOINTMENT_STATUS_LABEL,
+  canTransitionAppointment,
   type Appointment,
   type PatientSummary,
 } from '@emr/contracts';
 import { api } from '@/lib/api-client';
 import { qk } from '@/lib/query-client';
-import { useChangeAppointmentStatus } from '@/features/queue/api';
+import { useChangeAppointmentStatus, useCheckIn } from '@/features/queue/api';
 import { useCan } from '@/lib/session';
 import { ageGender, formatTime } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
+import { APPOINTMENT_STATUS_TONE } from '@/lib/appointment-status';
 import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/field';
 import { Panel, PanelHeader, PageHeader } from '@/components/ui/surface';
@@ -26,15 +29,6 @@ interface Row {
   practitionerName: string | null;
 }
 
-const TONE: Record<string, 'neutral' | 'accent' | 'positive' | 'warning' | 'critical'> = {
-  SCHEDULED: 'neutral',
-  CONFIRMED: 'info' as never,
-  ARRIVED: 'accent',
-  IN_PROGRESS: 'accent',
-  FULFILLED: 'positive',
-  CANCELLED: 'neutral',
-  NOSHOW: 'warning',
-};
 
 /**
  * The appointment calendar.
@@ -46,6 +40,7 @@ export default function AppointmentsPage() {
   const canManage = useCan('appointment:update');
   const canBook = useCan('appointment:create');
   const changeStatus = useChangeAppointmentStatus();
+  const checkIn = useCheckIn();
 
   const { data, isLoading } = useQuery({
     queryKey: qk.appointments('today', 'today'),
@@ -107,25 +102,64 @@ export default function AppointmentsPage() {
                 </span>
 
                 {canManage ? (
-                  <Select
-                    className="w-40 shrink-0"
-                    aria-label={`Status for ${row.patient.fullName}`}
-                    value={row.appointment.status}
-                    onChange={(event) =>
-                      changeStatus.mutate({
-                        appointmentId: row.appointment.id,
-                        status: event.target.value as Appointment['status'],
-                      })
-                    }
-                  >
-                    {Object.entries(APPOINTMENT_STATUS_LABEL).map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </Select>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {/*
+                      CHECK IN IS A BUTTON, not an option buried in a dropdown.
+                      It is the single most frequent action at a front desk — it
+                      happens once per patient per day — and making somebody open
+                      a select and find the right word for it is how a queue of
+                      people forms at the counter.
+                    */}
+                    {canTransitionAppointment(row.appointment.status, 'ARRIVED') ? (
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        loading={checkIn.isPending}
+                        onClick={() => checkIn.mutate(row.appointment.id)}
+                      >
+                        <LogIn aria-hidden />
+                        Check in
+                      </Button>
+                    ) : null}
+
+                    {/*
+                      The rest of the moves, and ONLY the legal ones.
+                      This previously listed every status in the enum, so reception
+                      could send a scheduled appointment straight to "Completed"
+                      with nobody seen. The server refuses that now — which would
+                      have turned a silently wrong action into a visible error,
+                      which is better but still a screen offering what cannot work.
+                    */}
+                    {ALLOWED_STATUS_TRANSITIONS[row.appointment.status].length > 0 ? (
+                      <Select
+                        className="w-36"
+                        aria-label={`Move ${row.patient.fullName} to another status`}
+                        value=""
+                        onChange={(event) => {
+                          if (!event.target.value) return;
+                          changeStatus.mutate({
+                            appointmentId: row.appointment.id,
+                            status: event.target.value as Appointment['status'],
+                          });
+                        }}
+                      >
+                        <option value="">
+                          {APPOINTMENT_STATUS_LABEL[row.appointment.status]}…
+                        </option>
+                        {ALLOWED_STATUS_TRANSITIONS[row.appointment.status].map((value) => (
+                          <option key={value} value={value}>
+                            {APPOINTMENT_STATUS_LABEL[value]}
+                          </option>
+                        ))}
+                      </Select>
+                    ) : (
+                      <Badge tone={APPOINTMENT_STATUS_TONE[row.appointment.status]}>
+                        {APPOINTMENT_STATUS_LABEL[row.appointment.status]}
+                      </Badge>
+                    )}
+                  </div>
                 ) : (
-                  <Badge tone={TONE[row.appointment.status] ?? 'neutral'}>
+                  <Badge tone={APPOINTMENT_STATUS_TONE[row.appointment.status]}>
                     {APPOINTMENT_STATUS_LABEL[row.appointment.status]}
                   </Badge>
                 )}

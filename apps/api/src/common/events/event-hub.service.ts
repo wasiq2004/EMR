@@ -39,6 +39,21 @@ export type EventType =
    * doctor's clarification card both refetch on receipt; the event says
    * "something changed", not what.
    */
+  /*
+   * The queue moved: somebody was checked in, called, finished or checked out.
+   * Identifiers only, like everything on this pipe — the calendar and the queue
+   * both refetch on receipt.
+   */
+  | 'queue-changed'
+  /*
+   * An appointment was booked, moved or resized.
+   *
+   * Distinct from `queue-changed`, which means somebody physically arrived,
+   * was called or left. A drag on the calendar changes nothing about who is in
+   * the waiting room, and a check-in changes nothing about the grid — collapsing
+   * the two would make every calendar refetch on every check-in, all day.
+   */
+  | 'appointment-changed'
   | 'rx-queued'
   | 'rx-dispensed'
   | 'rx-clarification'

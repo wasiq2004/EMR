@@ -313,3 +313,71 @@ describe('the Analytics panel', () => {
     expect(can('AUDITOR', 'analytics:read')).toBe(false);
   });
 });
+
+/**
+ * The calendar.
+ *
+ * It is a scheduling screen, so it follows `appointment:read` exactly — which
+ * the doctor, the front desk, the nurse and the administrator hold, and the
+ * pharmacist and the research analyst do not. The assertions below are about
+ * the sidebar not offering a door that the server will refuse; the guard on
+ * `GET /calendar` is the control, and `scripts/verify/availability.sh` proves
+ * it answers 403 for both of those roles.
+ */
+describe('the calendar', () => {
+  const hrefsFor = (role: UserRole) => linksFor(role).map((item) => item.href);
+
+  it('is offered to everyone who schedules', () => {
+    for (const role of ['OWNER_ADMIN', 'DOCTOR', 'RECEPTIONIST', 'NURSE_ASSISTANT'] as const) {
+      expect(hrefsFor(role), role).toContain('/calendar');
+    }
+  });
+
+  it('is not offered to the pharmacy or analytics panels', () => {
+    for (const role of ['PHARMACIST', 'RESEARCH_ANALYST', 'AUDITOR'] as const) {
+      expect(hrefsFor(role), role).not.toContain('/calendar');
+    }
+  });
+
+  /*
+   * The list is kept alongside the grid rather than replaced by it. A grid is
+   * how you find a free slot; a list is how you answer "who is coming on the
+   * 14th" and how you work a day on a phone at the counter. Losing the list
+   * when the calendar arrived would have been a regression dressed as a
+   * feature.
+   */
+  it('has not replaced the appointment list', () => {
+    expect(hrefsFor('RECEPTIONIST')).toContain('/appointments');
+  });
+
+  it('is permissioned, not hardcoded per role', () => {
+    const link = linksFor('DOCTOR').find((item) => item.href === '/calendar');
+    expect(link?.permission).toBe('appointment:read');
+    for (const role of ROLES) {
+      const offered = hrefsFor(role).includes('/calendar');
+      expect(offered, role).toBe(can(role, 'appointment:read'));
+    }
+  });
+});
+
+/**
+ * Doctor schedules live under settings, with clinic configuration.
+ *
+ * `clinic:update`, not `appointment:update`: rewriting a doctor's working week
+ * is configuration, and reception entering next Tuesday's leave is not. Those
+ * are different permissions and the split is deliberate — see the availability
+ * routes.
+ */
+describe('doctor schedules', () => {
+  it('is offered to an administrator', () => {
+    expect(settingsLinksFor('OWNER_ADMIN').map((l) => l.href)).toContain(
+      '/settings/schedules',
+    );
+  });
+
+  it('is not offered to the front desk, who cannot rewrite a working week', () => {
+    expect(settingsLinksFor('RECEPTIONIST').map((l) => l.href)).not.toContain(
+      '/settings/schedules',
+    );
+  });
+});

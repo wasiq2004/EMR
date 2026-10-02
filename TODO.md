@@ -266,3 +266,388 @@ row and the `@verify.test` operator. `pilot`, `clinic` and `clinic-plus` remain.
 - `platform-db.service.ts` needed a documented `no-restricted-imports` exemption: it
   is the operations console's own BYPASSRLS connection and deliberately does not go
   through `TenantDb`. The comment states why, so the next reader does not "fix" it.
+
+---
+
+# Dead-control audit, 2026-09-28
+
+Prompted by the owner finding Settings → Staff and roles read-only. Scanned every
+`<Button>` in the web app for a missing handler, and every API route for a missing
+caller, rather than looking for more by eye.
+
+Scanners kept at `scratchpad/deadbuttons.py` and `routes2.py` — the route one has
+to be template-literal aware or it reports ~40 false positives, because most
+parameterised calls are built as `` `/x/${id}/y` ``.
+
+## Found
+
+- **15 buttons** with no `onClick`, no `asChild`, no submit handler
+- **5 settings pages that were pure stubs** — 34 lines, zero queries, zero
+  mutations, rendering a hardcoded empty state that would say "No services
+  defined" forever
+- **8 endpoints with no caller** after filtering false positives
+
+## Fixed
+
+- [x] **`POST /auth/refresh` was never called by anything.** Access token TTL is
+      ten minutes, so every user was signed out mid-work every ten minutes and the
+      server's refresh-token rotation was dead code. The API client now refreshes
+      once on a 401 and replays. Coalesced behind a single in-flight promise: the
+      server rotates the refresh token on use, so N concurrent 401s each posting
+      their own refresh would invalidate each other and kill the session.
+- [x] Settings → Staff and roles: invite, edit (including role), reset password
+- [x] Settings → Services and fees: full CRUD, plus `POST /services` on the API
+- [x] Settings → Locations: full CRUD, plus `POST /locations` on the API,
+      with the single-primary rule enforced in one transaction
+
+## Still open
+
+- [ ] Settings → Consent text — stub, and no write API
+- [ ] Settings → Consultation templates — stub, `GET` only
+- [ ] Settings → Prescription sets — stub, `GET` only
+- [ ] Document download: `GET /documents/:id/download` and `GET /share/:token/file`
+      have no caller, and three buttons that should call them are dead
+- [ ] `POST /share-links/:id/revoke` — a share link can be created, never revoked
+- [ ] `patients/merge` — dead primary action
+- [ ] `patients/[id]/consents`, `patients/[id]/documents` — dead buttons
+- [ ] `reports` — dead export button
+- [ ] `settings/import` — two dead buttons, `GET /imports` uncalled, no import path
+      at all (noted in the gap study)
+- [x] `settings/account` — two-factor HIDDEN, owner decision 2026-09-28. Four
+      surfaces commented out with a note on each saying what to undo:
+      the Settings panel, the grace-period banner on every screen, the
+      per-account badges in the staff list, and (annotated, not changed) the
+      `mfaRequired` expression in `auth.service.ts`, which already evaluates
+      false for every account so `/login/mfa` is unreachable.
+      Nothing was deleted: `mfa_enabled` and `mfa_secret_encrypted` stay on the
+      schema, `MFA_GRACE_DAYS` stays configurable, and the session still carries
+      `mfaGraceDaysRemaining`. Building TOTP enrolment and deleting the comment
+      markers is the whole of turning it back on.
+- [ ] Broadcasts: `POST :id/test`, `POST :id/cancel`, `GET :id/recipients` uncalled
+- [ ] `POST /pharmacy/sales/:id/return` — hook and service exist, no UI
+
+---
+
+# Phase 3 — Calendar, clinical capture, follow-up, money
+
+Plan and reasoning: `docs/phase-3-plan.md`. Read that before starting any item —
+four of the seven asks are partly built already and two needed decisions first.
+
+**Decided 2026-10-02:** doctor registration number stays optional-and-visible
+(current behaviour, no change); reminders are WhatsApp now with email modelled but
+stubbed; the scheduler is cron calling an idempotent `POST /jobs/run-due`.
+
+## Stage C — Check-in / check-out  (small, independent — do first)
+- [x] C1. `CHECKED_OUT` on `appointment_status`, + migration
+- [x] C2. Front desk: Check in (`SCHEDULED|CONFIRMED → ARRIVED`, stamps `arrived_at`)
+- [x] C3. Front desk: Check out (`FULFILLED → CHECKED_OUT`), prompting to raise the
+      invoice if none exists
+- [x] C4. Queue screen reflects both; doctor's start/finalise already covers the middle
+- [x] **Checkpoint** — one patient walked the whole machine end to end against the
+      live stack: SCHEDULED → (illegal jump to FULFILLED refused 409) → check in →
+      (check out before signing refused 409) → consult → finalise → check out →
+      (reopen refused 409). Board moved 1 waiting → 1 to-check-out → 1 checked-out.
+
+**Also fixed while in there, both pre-existing:**
+- `changeStatus` was a blanket setter — the API would revive a cancelled
+  appointment or send a scheduled one straight to completed with nobody seen.
+  `ALLOWED_STATUS_TRANSITIONS` existed in contracts but drove **only the UI**.
+  The server enforces it now.
+- The appointments list rendered a dropdown of **every** status regardless of
+  what was reachable, so it offered moves the server would refuse. It now lists
+  only legal transitions, with Check in promoted to a button.
+
+## Stage F — Billing from the visit  (small, independent)
+- [x] F1. Raise an invoice from the consultation screen, pre-filled from the
+      appointment's service
+- [x] F2. Raise an invoice at check-out
+- [x] F3. Patient billing tab: every invoice, paid, outstanding
+- [x] **Checkpoint** — in `scripts/verify/consultation-flow.sh`: an invoice
+      raised against the encounter, found again by `/invoices/for-encounter`,
+      part-paid ₹300 of ₹800 with the remainder still owing and the invoice NOT
+      marked BALANCED, then settled and closed by itself. 54 assertions green.
+
+      The checkpoint found that the front desk could not take money at all.
+      `RecordPayment` has always required an `idempotencyKey` in the body and
+      carried the comment "a retried request must not take the payment twice".
+      Three things were wrong at once, and each one hid the next:
+
+      1. `payment` had no column for the key. It was parsed, validated and
+         thrown away, so a resubmitted payment was recorded twice — two
+         identical ₹300 receipts, both looking real, and no way to tell later
+         which was never collected. Fixed with `idempotency_key` and a partial
+         unique index on (clinic_id, idempotency_key); `recordPayment` now
+         inserts `ON CONFLICT DO NOTHING` and returns the original payment on a
+         replay. The index does the work, because a check-then-insert loses the
+         race to the two concurrent taps this guards against.
+      2. The payment screen sent the key as an `Idempotency-Key` HEADER, which
+         nothing on the server reads, and nothing in the body — so **every
+         payment submitted from the interface returned 422**. Verified against
+         the running API before and after. It now sends the key in the body.
+      3. The key was minted inside `mutationFn`, so each retry carried a new
+         one. Even once plumbed through, that is not idempotency. It is held in
+         a ref now and replaced only after the payment lands.
+
+      `@Idempotent()` was deleted. It was applied to no route, no guard read its
+      metadata, and a decorator in `decorators.ts` named for a guarantee is
+      precisely what made this invisible for so long.
+
+## Stage A — Practitioner availability  (foundation for the calendar)
+- [x] A1. `practitioner_schedule` — practitioner, location, weekday, start, end,
+      slot minutes, effective dates
+- [x] A2. `schedule_exception` — date, reason, optional replacement hours
+- [x] A3. Slot derivation: pattern − exceptions − booked
+- [x] A4. Settings → Doctor schedules (Clinic Admin)
+- [x] **Checkpoint** — `scripts/verify/availability.sh`, 42 assertions, all green
+      against a real clinic. It proves the derivation rather than the plumbing:
+      a 09:00–10:00 session at 15 minutes is exactly four slots at 09:00, 09:15,
+      09:30 and 09:45 and nothing at 10:00; a 50-minute session at 20 drops the
+      ten-minute remainder instead of offering an appointment half the length of
+      its own slot; a booking takes a slot and a CANCELLED one gives it back; a
+      day of leave returns no slots and says why; and a doctor's own entry beats
+      a clinic-wide closure, so "we are shut for the holiday but Dr Rao is coming
+      in" is expressible.
+
+      Two things the checkpoint changed. Slot instants are UTC, and the suite's
+      first assertions grepped a local-looking string that can never appear —
+      they passed without testing anything, which is worse than failing, so the
+      expected instant is now resolved through the clinic's own timezone. And
+      `eachDate` silently truncated a range at 120 days: a caller asking for a
+      year got four months with no indication the rest was dropped, which renders
+      as a doctor who stops working in February. The controller now refuses the
+      range outright; the cap stays as a bound on the method itself.
+
+### Still open after Stage F
+- [ ] Six write endpoints are passed an `idempotencyKey` by the web client that
+      goes nowhere: `POST /appointments`, `/queue`, `/patients`,
+      `/pharmacy/lines/:id/fill`, `/pharmacy/receipts`, `/pharmacy/sales`. None
+      has the field in its contract or a column for it, so the client's key is
+      sent as a header the server ignores. They are not broken — they never
+      promised the guarantee at the contract level — but `/pharmacy/sales` takes
+      money and `/pharmacy/receipts` creates stock, so a double-tap there is a
+      real duplicate. The fix for each is the same shape as the payment one: the
+      field in the contract, a column, a partial unique index, `ON CONFLICT DO
+      NOTHING`. Deliberately not done silently as part of Stage F — it is six
+      migrations and six call sites, and worth its own pass.
+
+## Stage B — The calendar
+- [x] B1. `GET /calendar` — appointments + derived free slots for a range.
+      ONE endpoint, not a client-side join of `/appointments` and
+      `/availability/slots`, because the analytics strip has to agree with the
+      grid beneath it. Filter to one doctor and the strip narrows with it. Two
+      round trips reconciled in the browser is two chances to disagree, and the
+      number that disagrees is the one somebody reads out in a meeting.
+- [x] B2. Views: day, 3-day, week, month, per-doctor columns. The month sends
+      `includeSlots=false` — thirty cells of counts do not need five doctors ×
+      thirty days × forty slots of derivation. The slot-dependent figures come
+      back `null` rather than `0`, because zero reads as "fully booked".
+      View and date live in the QUERY STRING, so a day can be linked, the back
+      button undoes a month-to-day drill-down, and an all-day-open tab survives
+      a refresh in place.
+- [x] B3. Click an empty slot → booking dialog carrying the time, doctor and
+      length from the slot. The full form at `/appointments/new` stays for the
+      case where none of that is settled yet.
+- [x] B4. Drag to move, resize, or move between doctors' columns →
+      `PATCH /appointments/:id/schedule`. Separate from `changeStatus` on
+      purpose: "rescheduled to Thursday" and "marked no-show" are different
+      facts and must not share an audit entry. Version-checked, closed
+      appointments refused, an end before its start refused rather than swapped.
+- [x] B5. Filters: doctor, location, status (multi), walk-in vs booked, and
+      "only mine" — which is the doctor's own id as a `practitionerId` filter
+      rather than a separate mode, so the analytics narrow with it.
+- [x] B6. Day analytics strip, counted server-side over the filtered rows.
+      Utilisation EXCLUDES cancellations and no-shows: a doctor is not busy
+      during an appointment nobody attended, and counting them would make the
+      worst day of the month read as the busiest.
+- [x] B7. `appointment:read` only. Verified against live sessions — pharmacist
+      403, analyst 403, doctor and front desk 200 — plus nav tests asserting the
+      link appears exactly where `can(role, 'appointment:read')` is true.
+- [x] B8. Live over the existing SSE pipe.
+- [x] **Checkpoint** — `scripts/verify/availability.sh` (85 assertions) and two
+      browser tests. The live one runs TWO browser contexts: the doctor watches
+      a day, the front desk books into it in a different session, and the
+      doctor's free-slot count has to drop within 8 SECONDS — deliberately well
+      under the 60-second poll, which would otherwise make the test pass while
+      proving nothing.
+
+      That checkpoint found THREE faults that each hid the next:
+      1. `book()` emitted no event at all. Every other transition on an
+         appointment did — check-in, call, move — so the calendar updated live
+         for everything except a brand new booking, the one case where
+         staleness means two receptionists sell the same 09:30.
+      2. The web client's `EVENT_TYPES` list had no `appointment-changed` and no
+         `queue-changed`. `EventSource` dispatches NAMED events, so a type
+         absent from that list has no listener and is dropped on arrival — the
+         queue's existing emit had been going nowhere too.
+      3. `addWalkIn()` emitted nothing either, so a patient arriving at the
+         counter took up to a minute to appear on the doctor's queue.
+
+      Also fixed on the way: `/settings/schedules` was listed in the sidebar
+      under `appointment:read` while the API gates saving a schedule on
+      `clinic:update` — the front desk was offered a page where every save would
+      be refused. A door onto a wall. Now `clinic:update`, with a nav test.
+
+## Stage D — Clinical capture
+- [x] D1. Vitals grid — units fixed per measure, a CRITICAL band distinct from
+      merely out-of-range, and BMI derived on the Asian cut-offs (overweight from
+      23, not 25: Indian guidance, because cardiometabolic risk rises at a lower
+      BMI in South Asian populations and the WHO international bands would tell a
+      large share of this product's patients they are a healthy weight).
+
+      BMI is **not stored**. It is two numbers already on the record divided by
+      each other, and a stored copy stops agreeing the first time somebody
+      corrects a mistyped weight — leaving a record reporting a BMI its own
+      height and weight do not produce.
+
+      **The bug this uncovered.** `recordObservation` read `referenceLow`,
+      `referenceHigh` and `interpretation` off the request, but
+      `RecordObservation` never declared them, so `parseBody` stripped all three
+      and the service wrote null **every time** — while the contract's own
+      comment said the interpretation was "computed at write time and surfaced on
+      the Snapshot". Every vital the product has ever recorded, a systolic of 210
+      included, was stored with nothing marking it abnormal. The patient page
+      already read that field, so it had been quietly claiming every reading was
+      in range.
+
+      Fixed by deriving all three **server-side from the LOINC code** and
+      ignoring whatever the caller sends. A browser on last month's build would
+      otherwise stamp last month's thresholds onto today's records, and "is this
+      reading dangerous" is a clinical assertion — a field that says only what
+      the caller chose to claim is worse than absent. The unit is overridden the
+      same way: a weight filed in pounds under a kilogram code is not a
+      validation message, it is a dose later calculated on the wrong body weight.
+
+      Also: the two vitals displays were near-copies that had drifted. The
+      consultation screen showed no flag at all — the one screen where it matters
+      most — and the patient page rendered `CRITICAL` as "Below range". Both now
+      use one `VitalsGrid`, and a null interpretation reads "Not range-checked"
+      rather than "In range", because nothing having checked a weight is not the
+      same as having checked it and found it fine.
+
+- [x] D2. `diagnosis_catalogue_item` + a curated ICD-10 subset. **314 codes, not
+      the planned 1,500, and that is a decision rather than an unfinished job.**
+
+      An ICD-10 code written into a record travels onto insurance claims, into
+      ABDM, and into whatever the next clinician reads. A wrong code is worse
+      than no code, because free text is self-evidently a clinician's own words
+      while a code carries the authority of a standard. Every entry seeded is one
+      we are confident of; padding the list to a target by guessing would trade a
+      visible gap for an invisible error. The gap is covered three ways instead:
+      free text is always available, a clinic can add its own rows, and
+      `diagnosis-catalogue.ts` documents loading a full licensed release — a
+      procurement decision, like replacing the drug catalogue with a licensed
+      formulary.
+
+      Curation is also what makes a typeahead usable: searching "fever" in the
+      full 70,000 returns dozens of qualifiers nobody at an outpatient desk will
+      use and buries the one they want. The selection is weighted to what a 1–5
+      doctor Indian OPD sees — vector-borne fever, tuberculosis, nutritional
+      deficiency, the metabolic cluster — and holds almost no inpatient or
+      oncological codes. WHO ICD-10, not ICD-10-CM; the two diverge and mixing
+      them produces records that validate against neither.
+
+      Migration `0011` asserts the shared-reference boundary in both directions:
+      a SELECT policy admitting the system tenant must exist (or every clinic's
+      typeahead is silently empty while the seed reports success), and **no write
+      policy may admit it** — one clinic renaming a diagnosis must not rename it
+      for every clinic on the deployment.
+
+- [x] D3. Diagnosis typeahead, free text always first-class. Shown **alongside**
+      the matches rather than only when the search fails: the commonest case is a
+      doctor whose phrasing is close to a listed code but who means something
+      more specific, and hiding the option whenever there are results would make
+      the nearest wrong code the path of least resistance.
+
+      **Ranking is on word boundaries, not string prefixes.** Typing "urti"
+      returned *urticaria* first — a rare skin complaint — because it starts with
+      those four letters, while URTI is a mid-string synonym on J06.9, among the
+      commonest diagnoses in an Indian OPD. Now: exact whole word, then
+      word-prefix, then substring, then trigram. Regex metacharacters are escaped
+      first, so J02.9 no longer also matches J02X9.
+
+      `POST /conditions` already accepted `code`/`codeSystem` and defaulted them
+      to null — what was missing was any way for the screen to send them, so
+      **every diagnosis the product had ever recorded was uncoded.** The
+      data-quality screen's `diagnoses-coded` ratio needed no change; it moves on
+      its own now.
+
+- [x] D4. Dose, frequency, duration, route, quantity and instructions, with
+      presets and free text underneath.
+
+      **The most serious defect found in this stage.** Selecting a drug committed
+      the line immediately with `frequency: '1-0-1'`,
+      `timingRelativeToFood: 'AFTER_FOOD'` and `durationDays: 5` **hardcoded in
+      the consultation screen** — for every drug, every time, whatever the doctor
+      intended — and the panel then displayed those three values back as
+      read-only chips with no way to change them. A patient could leave holding a
+      printed prescription saying twice a day after food for five days for a drug
+      meant once at night for three. Every field was already in the contract and
+      in the table. Nothing was ever asking.
+
+      Three more things in the same flow:
+      * The quantity to dispense is now computed — doses per day × days, rounded
+        **up**, because half a tablet cannot be dispensed and rounding down sends
+        the patient home one short on the last day. Blank for SOS, where there is
+        no daily total and a confident number would be a wrong one. 11 unit tests
+        in `dosage.test.ts`.
+      * A null timing rendered as "After food", so a line with no timing
+        recorded displayed, and printed, an instruction nobody gave.
+      * The client safety pre-check passed `isTeleconsultation: false`
+        hardcoded, so a Schedule X drug in a teleconsultation passed the client
+        check and was refused by the server **after** the doctor had filled in
+        the dose — with the dialog that explains why never appearing.
+
+      `PATCH /prescriptions/:id` added, because a mis-set dose could previously
+      only be fixed by deleting the line and starting again. The drug itself is
+      deliberately **not** editable: swapping the medicine would slide past the
+      allergy and duplicate-therapy checks that ran when the line was added, and
+      `safetyWarningsShown` would then describe a drug no longer on the line.
+
+- [x] **Checkpoint** — 105 assertions in `consultation-flow.sh` plus a browser
+      test that drives the whole screen: a systolic of 210 flagged as critical
+      *and verified from the server* as stored CRITICAL, BMI appearing at 24.9
+      once both numbers are in, a coded diagnosis chosen by keyboard, a free-text
+      one taken as typed, a drug dosed at 0-0-1 for 3 days with the quantity
+      auto-computed to 3, and that dose then revised in place — each one asserted
+      against what the API actually holds, because the whole bug was a screen
+      displaying values the doctor never chose.
+
+      The browser run found one more: `Field` clones its single child to attach
+      the id its label points at, so wrapping the presets and the input in a div
+      handed the **div** that id — a label pointing at a div, and two elements
+      sharing one id.
+
+## Stage E — Follow-up and reminders
+- [ ] E1. Follow-up picker on the consultation — optional; columns already exist
+- [ ] E2. `scheduled_reminder` — what, who, when, channel, status, attempts, sent-at
+- [ ] E3. `POST /jobs/run-due`, **idempotent**: claim with
+      `UPDATE ... WHERE status = 'PENDING'` before sending
+- [ ] E4. WhatsApp delivery, consent-gated; email records a clear failure
+- [ ] E5. Optional copy to the clinic's admin number, off by default, audited
+- [ ] E6. Reminder log: sent, to whom, delivered or not
+- [ ] E7. Document the cron line in the README and the macOS guide
+- [ ] **Checkpoint** — a follow-up set today for tomorrow fires once, not twice
+
+## Stage G — Clinic Admin analytics
+- [ ] G1. Filters: date range, doctor, location, service, payment method
+- [ ] G2. Revenue: collected, outstanding, by method / doctor / service
+- [ ] G3. Patients: new vs returning, registrations over time
+- [ ] G4. Appointments: booked, completed, no-show %, cancellation %, utilisation
+      (needs Stage A)
+- [ ] G5. Invoice summary with outstanding ageing
+- [ ] G6. CSV export per view
+
+## Stage H — Lab  (separate; do not bundle)
+- [ ] H1. `lab_order`, `lab_result`, reference ranges, abnormal flagging
+- [ ] H2. Report attachment
+- [ ] H3. Doctor's "Results to review" card — a blueprint P0 that cannot exist
+      without H1
+
+## Carried over from the dead-control audit
+- [ ] Browser suite covers none of pharmacy / analytics / platform — 22 screens
+      with no automated render check
+- [ ] Three stub settings pages: Consent text, Consultation templates, Prescription sets
+- [ ] Document download: `/documents/:id/download`, `/share/:token/file` uncalled
+- [ ] `POST /share-links/:id/revoke` uncalled
+- [ ] `patients/merge` dead primary action
+- [ ] Broadcast test / cancel / recipients uncalled

@@ -155,6 +155,19 @@ export class AuthService {
       accessToken,
       refreshToken,
       refreshTtlSeconds: ttl,
+      /*
+       * ALWAYS FALSE TODAY, and deliberately so — owner decision, 2026-09-28.
+       *
+       * Enrolment was never built, so `mfaEnabled` is false on every account and
+       * both branches of this expression evaluate to false. The frontend's
+       * redirect to `/login/mfa` is therefore unreachable, which is what we want
+       * while there is no way to enrol: sending someone to a code screen they
+       * cannot satisfy would lock them out of their own clinic.
+       *
+       * The expression is left intact rather than hardcoded to `false` because
+       * it is already correct — once enrolment exists and accounts start setting
+       * `mfaEnabled`, this begins returning true on its own with no edit here.
+       */
       mfaRequired: mfaIsMandatoryFor(user.role) && !user.mfaEnabled ? false : user.mfaEnabled,
       session: toSession(user, clinic),
     };

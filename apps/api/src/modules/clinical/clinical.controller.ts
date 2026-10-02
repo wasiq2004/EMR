@@ -1,11 +1,12 @@
-import { Body, Controller, Get, Headers, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Patch, Post, Query } from '@nestjs/common';
 import {
+  AddDiagnosisCode,
   AmendEncounter,
   RecordAllergy,
   RecordCondition,
   RecordObservation,
 } from '@emr/contracts';
-import { Audit, RequirePermission } from '../../common/http/decorators';
+import { Audit, RequirePermission, SkipAudit } from '../../common/http/decorators';
 import { parseBody, requireUuid } from '../../common/http/zod.pipe';
 import { ClinicalService } from './clinical.service';
 
@@ -109,6 +110,49 @@ export class ClinicalController {
   @Post('conditions')
   condition(@Body() body: unknown) {
     return this.clinical.recordCondition(parseBody(RecordCondition, body) as never);
+  }
+
+  /* --- The diagnosis catalogue -------------------------------------------- */
+
+  /**
+   * Codes matching what is being typed.
+   *
+   * `condition:read` rather than `condition:create`, because looking a code up
+   * is reading reference data. That gives it to the doctor, the nurse and the
+   * administrator — the nurse can see what a code means without being able to
+   * record a diagnosis, which is the split that matters. Reception holds
+   * neither and has no reason to search diagnoses.
+   *
+   * Exempt from the audit trail: it fires on every keystroke, it reads a
+   * reference list rather than anybody's record, and it would otherwise
+   * dominate the table — the same reason the drug search is exempt.
+   */
+  @RequirePermission('condition:read')
+  @SkipAudit()
+  @Get('diagnoses/search')
+  async searchDiagnoses(@Query('q') q?: string, @Query('limit') limit?: string) {
+    const parsed = Number(limit);
+    return {
+      items: await this.clinical.searchDiagnoses(
+        q ?? '',
+        Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 40) : 12,
+      ),
+    };
+  }
+
+  /**
+   * Adds a code this clinic uses that the shared set does not have.
+   *
+   * `clinic:update`, not `condition:create`. Recording a diagnosis on a patient
+   * is clinical work every doctor does; adding to the clinic's code list changes
+   * what everybody in the clinic is offered from then on, which is
+   * configuration.
+   */
+  @RequirePermission('clinic:update')
+  @Audit('DIAGNOSIS_CODE_ADDED', 'clinic')
+  @Post('diagnoses')
+  addDiagnosisCode(@Body() body: unknown) {
+    return this.clinical.addDiagnosisCode(parseBody(AddDiagnosisCode, body));
   }
 
   @RequirePermission('encounter:read')

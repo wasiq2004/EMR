@@ -185,6 +185,23 @@ export const payment = pgTable(
     /** UPI transaction reference, cheque number, card auth code. */
     referenceNumber: text('reference_number'),
 
+    /**
+     * The client's key for this one payment, so a retry cannot take the money
+     * twice.
+     *
+     * A front desk is the worst place for an at-least-once write. The terminal
+     * is tapped twice because the first tap did not visibly do anything, or the
+     * request times out and the receptionist tries again with the patient
+     * waiting — and a duplicate receipt looks exactly as real as the original.
+     * Reconciling it later means deciding which of two identical ₹300 rows was
+     * never actually collected, which nobody can do.
+     *
+     * Nullable, because payments written before this column existed have no key
+     * and inventing one would be a lie about what happened. The unique index is
+     * partial for the same reason.
+     */
+    idempotencyKey: text('idempotency_key'),
+
     receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
     receivedBy: uuid('received_by').notNull(),
 
@@ -203,6 +220,17 @@ export const payment = pgTable(
     index('payment_clinic_invoice_idx').on(t.clinicId, t.invoiceId),
     /** Daily collection report. */
     index('payment_clinic_received_idx').on(t.clinicId, t.receivedAt.desc()),
+    /*
+     * One payment per key per clinic.
+     *
+     * Scoped to the clinic rather than globally, so two clinics generating the
+     * same key cannot block each other. The database enforces this, not the
+     * service: a check-then-insert in application code loses to two concurrent
+     * requests, which is precisely the double-tap this exists to stop.
+     */
+    uniqueIndex('payment_idempotency_uq')
+      .on(t.clinicId, t.idempotencyKey)
+      .where(sql`idempotency_key IS NOT NULL`),
     tenantPolicy('payment'),
   ],
 ).enableRLS();

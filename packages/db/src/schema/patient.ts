@@ -320,6 +320,15 @@ export const appointment = pgTable(
     /** Set when the doctor opens the encounter. */
     calledAt: timestamp('called_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
+    /**
+     * When the front desk closed the visit.
+     *
+     * Separate from `completedAt`, which is when the clinician finished. The gap
+     * between the two is how long a patient stood at the desk, and it is the only
+     * way to tell a visit that was settled from one the patient walked out of.
+     */
+    checkedOutAt: timestamp('checked_out_at', { withTimezone: true }),
+    checkedOutBy: uuid('checked_out_by'),
 
     /**
      * Manual ordering within the day's queue. Sparse integers (10, 20, 30…) so

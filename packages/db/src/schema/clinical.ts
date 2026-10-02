@@ -451,6 +451,120 @@ export const drugCatalogueItem = pgTable(
   ],
 ).enableRLS();
 
+
+/* ------------------------------------------------------------------------- *
+ * DiagnosisCatalogueItem — the codes the typeahead offers
+ * ------------------------------------------------------------------------- */
+
+/**
+ * A searchable list of diagnoses with their codes.
+ *
+ * SHARED REFERENCE DATA, like the drug catalogue: rows owned by
+ * `SYSTEM_CLINIC_ID` are visible to every clinic and writable by none, and a
+ * clinic may add its own private rows beside them. A paediatric practice that
+ * types "URTI with otitis" forty times a week should be able to keep it, and a
+ * code list nobody can extend gets worked around with free text.
+ *
+ * THIS IS A CONVENIENCE, NOT A CONSTRAINT. `condition.display_text` is the
+ * clinical record and `condition.code` is nullable — a diagnosis typed as free
+ * text is a first-class entry, always has been, and must stay that way. A doctor
+ * who cannot find the code for what they are looking at needs to write it down
+ * and move on, not pick the nearest wrong code. The data-quality screen counts
+ * the coded proportion precisely so the gap is visible instead of forced shut.
+ *
+ * WHY NOT STORE THE WHOLE OF ICD-10. Seventy thousand codes make a typeahead
+ * worse, not better: searching "fever" in the full set returns dozens of
+ * qualifiers nobody at an outpatient desk will ever use, and the right answer
+ * stops being first. The catalogue is meant to be curated down to what a clinic
+ * actually sees, which is why `isActive` exists and why a clinic can add rows.
+ */
+export const diagnosisCatalogueItem = pgTable(
+  'diagnosis_catalogue_item',
+  {
+    id: primaryKeyColumn(),
+    clinicId: clinicIdColumn(),
+
+    /**
+     * The code as the system writes it, e.g. "J02.9".
+     *
+     * Not unique, and deliberately. The same code legitimately appears under
+     * several phrasings a clinic searches by — "URTI", "upper respiratory tract
+     * infection", "common cold" — and forcing one row per code means whichever
+     * wording the doctor types is the one that does not match.
+     */
+    code: text('code').notNull(),
+
+    /**
+     * Which code system this came from, e.g. "http://hl7.org/fhir/sid/icd-10".
+     *
+     * A bare code is ambiguous: J02.9 means something in ICD-10 and something
+     * else in ICD-11, and a record carrying one without the other cannot be
+     * read ten years from now or handed to ABDM.
+     */
+    codeSystem: text('code_system').notNull(),
+
+    /** What the doctor sees and what lands in `condition.display_text`. */
+    displayText: text('display_text').notNull(),
+
+    /**
+     * Everything this row should match on, lowercased.
+     *
+     * Holds the display text, the code, and any synonyms or abbreviations a
+     * clinic searches by. Separate from `display_text` because what you search
+     * is not what you want written on the prescription: "URTI" finds it, "Acute
+     * upper respiratory infection" is what gets recorded.
+     */
+    searchNormalized: text('search_normalized').notNull(),
+
+    /**
+     * The ICD-10 chapter or block, for grouping in the picker.
+     *
+     * Nullable: a clinic's own row has no chapter and should not be made to
+     * invent one.
+     */
+    category: text('category'),
+
+    /**
+     * Whether this condition is ordinarily long-term.
+     *
+     * Pre-fills the "chronic" flag when the doctor picks it — diabetes and
+     * hypertension are chronic every time, and asking on each visit means the
+     * box is answered carelessly. It is a default and stays editable, because
+     * the same code can be either: "asthma" in a child who may grow out of it.
+     */
+    isChronicByDefault: boolean('is_chronic_by_default').notNull().default(false),
+
+    /** Version identifier of the source release, matching the drug catalogue. */
+    catalogueVersion: text('catalogue_version').notNull(),
+    isActive: boolean('is_active').notNull().default(true),
+
+    ...auditColumns(),
+  },
+  (t) => [
+    foreignKey({ columns: [t.clinicId], foreignColumns: [clinic.id] }).onDelete('restrict'),
+    /*
+     * Trigram search, same shape and same reason as the drug index: this runs
+     * while the doctor types, several times per diagnosis, and has to return in
+     * well under 200ms. Leads with clinic_id like every other index here.
+     */
+    index('diagnosis_catalogue_search_trgm_idx').using(
+      'gin',
+      t.clinicId.op('uuid_ops'),
+      t.searchNormalized.op('gin_trgm_ops'),
+    ),
+    index('diagnosis_catalogue_clinic_code_idx').on(t.clinicId, t.code),
+    /*
+     * One row per clinic per code per wording.
+     *
+     * Not per code — see `code` above, several wordings of one code is the
+     * point. This stops the same wording being imported twice, which is what a
+     * re-run of a seed or an import would otherwise do.
+     */
+    uniqueIndex('diagnosis_catalogue_uq').on(t.clinicId, t.code, t.displayText),
+    ...sharedReferencePolicy('diagnosis_catalogue_item'),
+  ],
+).enableRLS();
+
 /* ------------------------------------------------------------------------- *
  * 12. MedicationRequest (FHIR MedicationRequest — prescriptions)
  * ------------------------------------------------------------------------- */

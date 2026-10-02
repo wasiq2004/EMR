@@ -3,18 +3,22 @@
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Banknote } from 'lucide-react';
+import { Banknote, Plus } from 'lucide-react';
 import type { Invoice } from '@emr/contracts';
 import { api } from '@/lib/api-client';
 import { qk } from '@/lib/query-client';
 import { formatDate, formatPaise } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
-import { Panel, PanelHeader } from '@/components/ui/surface';
+import { Button } from '@/components/ui/button';
+import { StatRow } from '@/components/ui/data-state';
+import { Panel, PanelHeader, Stat } from '@/components/ui/surface';
+import { useCan } from '@/lib/session';
 import { EmptyState, SkeletonRows } from '@/components/ui/feedback';
 
 /** Invoices and payments for one patient. Amounts are stored in paise. */
 export default function PatientBillingPage() {
   const params = useParams<{ id: string }>();
+  const canBill = useCan('invoice:create');
   const { data, isLoading } = useQuery({
     queryKey: qk.patientInvoices(params.id),
     queryFn: () =>
@@ -22,16 +26,47 @@ export default function PatientBillingPage() {
   });
 
   const invoices = (data?.items ?? []).filter((i) => i.patientId === params.id);
-  const outstanding = invoices.reduce((sum, i) => sum + (i.totalPaise - i.paidPaise), 0);
+
+  /*
+   * A cancelled invoice is not a debt and not revenue.
+   *
+   * Summing every row would show a patient owing money for a bill that was
+   * voided — which is the figure somebody would then try to collect.
+   */
+  const live = invoices.filter((i) => i.status !== 'CANCELLED');
+  const billed = live.reduce((sum, i) => sum + i.totalPaise, 0);
+  const paid = live.reduce((sum, i) => sum + i.paidPaise, 0);
+  const outstanding = Math.max(billed - paid, 0);
 
   return (
-    <Panel>
+    <div className="flex flex-col gap-4">
+      <StatRow columns={3}>
+        <Stat label="Billed" value={formatPaise(billed)} hint={`${live.length} invoices`} />
+        <Stat label="Paid" value={formatPaise(paid)} tone="positive" />
+        <Stat
+          label="Outstanding"
+          value={formatPaise(outstanding)}
+          tone={outstanding > 0 ? 'warning' : 'neutral'}
+        />
+      </StatRow>
+
+      <Panel>
       <PanelHeader
-        title="Billing"
+        title="Invoices"
         description={
           outstanding > 0
             ? formatPaise(outstanding) + ' outstanding'
             : 'Nothing outstanding'
+        }
+        actions={
+          canBill ? (
+            <Button size="sm" variant="primary" asChild>
+              <Link href={`/billing/invoices/new?patientId=${params.id}`}>
+                <Plus aria-hidden />
+                New invoice
+              </Link>
+            </Button>
+          ) : null
         }
       />
       {isLoading ? (
@@ -60,7 +95,9 @@ export default function PatientBillingPage() {
                   <p className="text-sm font-medium tabular text-ink">
                     {formatPaise(invoice.totalPaise)}
                   </p>
-                  {due > 0 ? (
+                  {invoice.status === 'CANCELLED' ? (
+                    <Badge>Cancelled</Badge>
+                  ) : due > 0 ? (
                     <Badge tone="warning">{formatPaise(due)} due</Badge>
                   ) : (
                     <Badge tone="positive">Paid</Badge>
@@ -71,6 +108,7 @@ export default function PatientBillingPage() {
           })}
         </ul>
       )}
-    </Panel>
+      </Panel>
+    </div>
   );
 }

@@ -95,7 +95,11 @@ export default function ClinicSettingsPage() {
                   onChange={set('gstin')}
                 />
               </Field>
-              <Field label="Timezone" htmlFor="timezone" hint="Drives reminder timing.">
+              <Field
+                label="Timezone"
+                htmlFor="timezone"
+                hint="Drives appointment times, the calendar's day boundary and reminder timing."
+              >
                 <Select
                   id="timezone"
                   disabled={!canEdit}

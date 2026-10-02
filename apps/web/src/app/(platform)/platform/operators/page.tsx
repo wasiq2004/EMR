@@ -9,7 +9,7 @@ import {
   useUpdateOperator,
   type OperatorRow,
 } from '@/features/platform/api';
-import { CredentialReveal } from '@/features/platform/credential-reveal';
+import { CredentialReveal } from '@/components/ui/credential-reveal';
 import { ApiError } from '@/lib/api-client';
 import { formatDateTime, relativeTime } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';

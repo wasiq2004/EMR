@@ -78,6 +78,23 @@ const Env = z.object({
   STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
   STORAGE_LOCAL_PATH: z.string().default('/var/lib/emr/objects'),
 
+  /**
+   * Shared secret for `POST /jobs/run-due`.
+   *
+   * The reminder scheduler is a cron line, which has no user session and
+   * therefore cannot hold a clinic scope. A bearer secret is the right shape
+   * for that and the wrong shape for anything else — so this authenticates
+   * exactly one endpoint, which takes no parameters and returns nothing but
+   * counts. It cannot read a patient, and the work it triggers runs per clinic
+   * under ordinary RLS.
+   *
+   * Empty by default, and an empty value DISABLES the endpoint rather than
+   * leaving it open. A deployment that has not set this has no reminder
+   * scheduler, which is a visible absence; an endpoint that accepts an empty
+   * secret is an invisible hole.
+   */
+  JOBS_SECRET: z.string().default(''),
+
   PUBLIC_BASE_URL: z.string().default('http://localhost:3000'),
   CORS_ORIGINS: z.string().default('http://localhost:3000'),
 });
@@ -101,6 +118,15 @@ if (config.isProduction && config.JWT_SECRET.startsWith('development-only')) {
   throw new Error('JWT_SECRET must be set to a real secret in production.');
 }
 
+/*
+ * No warning if JOBS_SECRET is unset, and that is deliberate.
+ *
+ * A deployment with no reminder scheduler is a legitimate configuration — most
+ * clinics on this product have not connected WhatsApp at all. What must never
+ * happen is the endpoint accepting a request because the secret is empty, and
+ * that is enforced at the guard rather than here, where it would only be a log
+ * line somebody has to read.
+ */
 if (config.isProduction && config.ENCRYPTION_KEY.startsWith('development-only')) {
   throw new Error(
     'ENCRYPTION_KEY must be set to a real secret in production. ' +

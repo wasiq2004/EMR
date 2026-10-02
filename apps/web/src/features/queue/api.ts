@@ -7,7 +7,19 @@ import { qk } from '@/lib/query-client';
 
 export interface QueueResponse {
   waiting: QueueEntry[];
+  /** Seen by the clinician, still at the desk. The actionable list. */
   completed: QueueEntry[];
+  /** Settled and gone. The day's record. */
+  checkedOut: QueueEntry[];
+}
+
+/** What a visit owes, as the desk needs it at the moment of closing. */
+export interface BillingPosition {
+  invoiceId: string | null;
+  invoiceNumber: string | null;
+  totalPaise: number;
+  paidPaise: number;
+  outstandingPaise: number;
 }
 
 /**
@@ -126,5 +138,56 @@ export function useStartConsultation() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qk.queue() });
     },
+  });
+}
+
+
+/**
+ * The patient is here.
+ *
+ * Its own hook rather than a status change, so the audit trail reads as the thing
+ * that happened and the button has one job.
+ */
+export function useCheckIn() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (appointmentId: string) =>
+      api.post<Appointment>(`/appointments/${appointmentId}/check-in`, {}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qk.queue() });
+      void queryClient.invalidateQueries({ queryKey: ['appointments'] });
+      void queryClient.invalidateQueries({ queryKey: ['nav-counts'] });
+    },
+  });
+}
+
+/**
+ * The visit is closed.
+ *
+ * Returns the billing position in the same response, so the desk learns whether
+ * anything is still owed at the moment they close it rather than a screen later.
+ */
+export function useCheckOut() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (appointmentId: string) =>
+      api.post<{ appointment: Appointment; billing: BillingPosition }>(
+        `/appointments/${appointmentId}/check-out`,
+        {},
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qk.queue() });
+      void queryClient.invalidateQueries({ queryKey: ['appointments'] });
+      void queryClient.invalidateQueries({ queryKey: ['nav-counts'] });
+    },
+  });
+}
+
+/** What this visit owes, read before closing so the desk can decide. */
+export function useVisitBilling(appointmentId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['visit-billing', appointmentId],
+    queryFn: () => api.get<BillingPosition>(`/appointments/${appointmentId}/billing`),
+    enabled: enabled && Boolean(appointmentId),
   });
 }

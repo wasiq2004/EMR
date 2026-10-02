@@ -19,13 +19,31 @@ import * as React from 'react';
  * quiet reconnect loop turns into a busy one nobody notices.
  */
 
+/*
+ * Every event the server can send.
+ *
+ * This list is not documentation — it is the subscription. `EventSource`
+ * dispatches NAMED events, so a type missing from `EVENT_TYPES` below has no
+ * listener and is silently dropped on arrival. `queue-changed` was emitted by
+ * the API and absent here, which is why checking a patient in never moved
+ * anybody else's screen: the event arrived and nothing was listening for it.
+ *
+ * Adding a server event means adding it in both places.
+ */
 export type ServerEventType =
   | 'hello'
   | 'heartbeat'
   | 'message-new'
   | 'message-status'
   | 'conversation-changed'
-  | 'broadcast-progress';
+  | 'broadcast-progress'
+  /** Somebody arrived, was called, finished or was checked out. */
+  | 'queue-changed'
+  /** An appointment was booked, moved or resized. */
+  | 'appointment-changed'
+  | 'rx-queued'
+  | 'rx-dispensed'
+  | 'rx-clarification';
 
 export interface ServerEvent {
   type: ServerEventType;
@@ -42,6 +60,11 @@ const EVENT_TYPES: ServerEventType[] = [
   'message-status',
   'conversation-changed',
   'broadcast-progress',
+  'queue-changed',
+  'appointment-changed',
+  'rx-queued',
+  'rx-dispensed',
+  'rx-clarification',
 ];
 
 const BASE_DELAY_MS = 1_000;

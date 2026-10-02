@@ -3,13 +3,14 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import {
   ArrowLeft,
   Building2,
   Copy,
   Eye,
   Lock,
-  Plus,
+  Receipt,
   Thermometer,
   Trash2,
   Video,
@@ -19,13 +20,21 @@ import type {
   ConsultationMode,
   DrugCatalogueItem,
   EncounterDraft,
+  MedicationRequest,
   SafetyWarning,
 } from '@emr/contracts';
 import { CONSULTATION_MODE_LABEL } from '@emr/contracts';
 import { usePatient, usePatientSnapshot } from '@/features/patients/api';
 import { RecordVitalsDialog } from '@/features/patients/record-vitals-dialog';
+import { useReminderSettings } from '@/features/reminders/api';
+import { VitalsGrid } from '@/features/patients/vitals-grid';
 import { AllergyBanner } from '@/features/patients/allergy-banner';
+import { DiagnosisCombobox } from '@/features/encounter/diagnosis-combobox';
 import { DrugCombobox } from '@/features/encounter/drug-combobox';
+import {
+  DosageDialog,
+  type DosageChoice,
+} from '@/features/encounter/dosage-dialog';
 import { SafetyWarningDialog } from '@/features/encounter/safety-warning-dialog';
 import {
   useAddDiagnosis,
@@ -37,10 +46,12 @@ import {
   useInternalNotes,
   usePrescriptionLines,
   useRemovePrescriptionLine,
+  useReviseDosage,
 } from '@/features/encounter/api';
+import { api } from '@/lib/api-client';
 import { checkPrescription, requiresAcknowledgement } from '@/lib/safety';
 import { useCan, useCanSign, useSession } from '@/lib/session';
-import { ageGender, formatDate } from '@/lib/format';
+import { ageGender, formatDate, formatPaise } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Field, Input, Textarea } from '@/components/ui/field';
@@ -78,6 +89,24 @@ export default function ConsultationPage() {
 
   const encounter = useEncounter(encounterId);
   const patientId = encounter.data?.patientId ?? '';
+  const canBill = useCan('invoice:create');
+
+  /*
+   * Read only once the consultation is signed. Before that there is nothing to
+   * bill and the request would be answered for every keystroke of autosave.
+   */
+  const billing = useQuery({
+    queryKey: ['encounter-billing', encounterId],
+    queryFn: () =>
+      api.get<{
+        invoiceId: string | null;
+        invoiceNumber: string | null;
+        totalPaise: number;
+        paidPaise: number;
+        outstandingPaise: number;
+      }>(`/invoices/for-encounter/${encounterId}`),
+    enabled: Boolean(encounterId) && (encounter.data?.isFinalized ?? false),
+  });
   const patient = usePatient(patientId);
   const snapshot = usePatientSnapshot(patientId);
   const lines = usePrescriptionLines(encounterId);
@@ -85,6 +114,7 @@ export default function ConsultationPage() {
 
   const addLine = useAddPrescriptionLine(encounterId);
   const removeLine = useRemovePrescriptionLine(encounterId);
+  const reviseDosage = useReviseDosage(encounterId);
   const addDiagnosis = useAddDiagnosis(encounterId, patientId);
   const addNote = useAddInternalNote(encounterId);
 
@@ -122,6 +152,49 @@ export default function ConsultationPage() {
     drug: DrugCatalogueItem | null;
     warnings: SafetyWarning[];
   } | null>(null);
+  /*
+   * A drug that has cleared safety and is waiting for its dose.
+   *
+   * Separate state from `pendingDrug`, which is a drug waiting for a safety
+   * acknowledgement. The two are sequential and must not be merged: a doctor
+   * overriding an allergy warning should answer that question on its own, then
+   * be asked the dose — not have both dialogs fighting over the same screen.
+   */
+  const [dosing, setDosing] = React.useState<{
+    name: string;
+    molecule: string | null;
+    drug: DrugCatalogueItem | null;
+    warnings: SafetyWarning[];
+    overrideReason: string | null;
+  } | null>(null);
+  /** A line whose dose is being changed, as opposed to a new drug being added. */
+  const [editingLine, setEditingLine] = React.useState<MedicationRequest | null>(null);
+
+  /*
+   * What the follow-up field is going to do, in words.
+   *
+   * Reminders are scheduled at SIGNING, not while this autosaves — editing the
+   * number must not create and cancel reminders as the doctor thinks. So the
+   * wording is future tense until the consultation is signed.
+   */
+  const reminderSettings = useReminderSettings();
+  const followUpDays = autosave.draft?.followUpAfterDays ?? null;
+  const followUpHint = (() => {
+    if (!followUpDays || followUpDays < 1) return 'Optional. Printed on the prescription.';
+    if (!reminderSettings.data) return 'Printed on the prescription.';
+    if (!reminderSettings.data.followUpEnabled) {
+      // Named plainly rather than left blank: the doctor should not assume a
+      // reminder will go out when the clinic has them off.
+      return 'Printed on the prescription. No reminder — this clinic has follow-up reminders switched off.';
+    }
+    const lead = reminderSettings.data.leadTimeDays;
+    const when = new Date();
+    when.setDate(when.getDate() + followUpDays - lead);
+    return `A WhatsApp reminder will be scheduled for ${when.toLocaleDateString(undefined, {
+      day: 'numeric',
+      month: 'short',
+    })} when you sign this, if the patient has consented.`;
+  })();
 
   const allergies: Allergy[] = snapshot.data?.allergies ?? [];
   const finalised = encounter.data?.isFinalized ?? false;
@@ -149,7 +222,18 @@ export default function ConsultationPage() {
           safetyWarningsShown: [],
           safetyOverrideReason: null,
         })),
-        isTeleconsultation: false,
+        /*
+         * The REAL mode, not a hardcoded false.
+         *
+         * Schedule X may not be prescribed by telemedicine, and the server
+         * enforces that from the encounter's own `consultationMode`. Passing
+         * false here meant the client pre-check never raised the warning, so a
+         * doctor in a teleconsultation chose a Schedule X drug, filled in the
+         * dose, pressed save, and only then got a 422 from the server — with
+         * the dialog that explains why never appearing. The check was right;
+         * the input to it was a lie.
+         */
+        isTeleconsultation: encounter.data?.consultationMode === 'TELECONSULTATION',
       },
     );
 
@@ -157,15 +241,27 @@ export default function ConsultationPage() {
       setPendingDrug({ name, molecule, drug, warnings });
       return;
     }
-    void commitLine(name, molecule, drug, warnings, null);
+    setDosing({ name, molecule, drug, warnings, overrideReason: null });
   };
 
+  /**
+   * Writes the line, with the dose the prescriber actually chose.
+   *
+   * This used to hardcode `frequency: '1-0-1'`, `timingRelativeToFood:
+   * 'AFTER_FOOD'` and `durationDays: 5` for every drug, whatever the doctor
+   * intended, and the panel then displayed those three values back as read-only
+   * chips with no way to change them — so a patient could leave with a printed
+   * prescription saying twice a day after food for five days for a drug meant
+   * once at night for three. Every field was already in the contract and the
+   * table. Nothing was asking.
+   */
   const commitLine = async (
     name: string,
     molecule: string | null,
     drug: DrugCatalogueItem | null,
     warnings: SafetyWarning[],
     overrideReason: string | null,
+    dose: DosageChoice,
   ) => {
     await addLine.mutateAsync({
       catalogueItemId: drug?.id ?? null,
@@ -173,14 +269,17 @@ export default function ConsultationPage() {
       moleculeName: molecule,
       strength: drug?.strength ?? null,
       dosageForm: drug?.dosageForm ?? null,
-      route: drug?.route ?? null,
-      frequency: '1-0-1',
-      timingRelativeToFood: 'AFTER_FOOD',
-      durationDays: 5,
+      route: dose.route,
+      frequency: dose.frequency,
+      timingRelativeToFood: dose.timingRelativeToFood,
+      durationDays: dose.durationDays,
+      quantity: dose.quantity,
+      instructions: dose.instructions,
       safetyWarningsShown: warnings,
       safetyOverrideReason: overrideReason,
     });
     setPendingDrug(null);
+    setDosing(null);
   };
 
   /* --- Copy forward ----------------------------------------------------- */
@@ -272,13 +371,58 @@ export default function ConsultationPage() {
       ) : null}
 
       {finalised ? (
-        <Alert tone="info" title="This consultation is signed and cannot be edited">
-          Corrections are recorded as a separate amendment linked to this record,
-          so the original stays intact.{' '}
-          <Link href={`/encounters/${encounterId}/amend`} className="font-medium underline">
-            Create an amendment
-          </Link>
-        </Alert>
+        <>
+          <Alert tone="info" title="This consultation is signed and cannot be edited">
+            Corrections are recorded as a separate amendment linked to this record,
+            so the original stays intact.{' '}
+            <Link href={`/encounters/${encounterId}/amend`} className="font-medium underline">
+              Create an amendment
+            </Link>
+          </Alert>
+
+          {/*
+            BILLING, OFFERED AT THE MOMENT IT IS OWED.
+            
+            Shown only once signed, because a consultation still being written is
+            not yet a chargeable thing — and offering to bill mid-sentence invites
+            an invoice for a visit that then changes. The invoice carries this
+            encounter's id, which is what lets check-out tell the front desk
+            whether the visit was billed at all.
+          */}
+          {canBill ? (
+            <Panel>
+              <PanelBody className="flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-ink">
+                    {billing.data?.invoiceId
+                      ? `Invoice ${billing.data.invoiceNumber}`
+                      : 'Not billed yet'}
+                  </p>
+                  <p className="mt-0.5 text-2xs text-ink-faint">
+                    {billing.data?.invoiceId
+                      ? billing.data.outstandingPaise > 0
+                        ? `${formatPaise(billing.data.outstandingPaise)} outstanding of ${formatPaise(billing.data.totalPaise)}`
+                        : `${formatPaise(billing.data.totalPaise)} settled in full`
+                      : 'Raise the invoice before the patient leaves the desk.'}
+                  </p>
+                </div>
+
+                <Button variant={billing.data?.invoiceId ? 'secondary' : 'primary'} asChild>
+                  <Link
+                    href={
+                      billing.data?.invoiceId
+                        ? `/billing/invoices/${billing.data.invoiceId}`
+                        : `/billing/invoices/new?patientId=${patientId}&encounterId=${encounterId}`
+                    }
+                  >
+                    <Receipt aria-hidden />
+                    {billing.data?.invoiceId ? 'Open invoice' : 'Raise an invoice'}
+                  </Link>
+                </Button>
+              </PanelBody>
+            </Panel>
+          ) : null}
+        </>
       ) : null}
 
       <AllergyBanner allergies={allergies} />
@@ -360,7 +504,22 @@ export default function ConsultationPage() {
               </Field>
 
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Follow up in (days)" htmlFor="followUpAfterDays">
+                <Field
+                  label="Follow up in (days)"
+                  htmlFor="followUpAfterDays"
+                  /*
+                   * Says what will actually happen, which it previously did not.
+                   *
+                   * This field has always been stored and printed on the
+                   * prescription, but nothing acted on it — so a doctor writing
+                   * "7" had no way to know whether the patient would be
+                   * reminded. Now one is scheduled when the consultation is
+                   * SIGNED, and a field with a consequence should state it:
+                   * silence here is how a doctor ends up assuming a reminder
+                   * went out when the clinic has them switched off.
+                   */
+                  hint={followUpHint}
+                >
                   <Input
                     inputMode="numeric"
                     className="token"
@@ -411,25 +570,19 @@ export default function ConsultationPage() {
                 ) : null
               }
             />
-            <PanelBody className="grid grid-cols-2 gap-3">
+            <PanelBody>
               {(snapshot.data?.latestVitals ?? []).length === 0 ? (
-                <p className="col-span-2 text-xs text-ink-faint">
-                  No vitals recorded for this patient.
-                </p>
+                <p className="text-xs text-ink-faint">No vitals recorded for this patient.</p>
               ) : (
-                (snapshot.data?.latestVitals ?? []).map((vital) => (
-                  <div key={vital.id}>
-                    <p className="text-2xs uppercase tracking-wide text-ink-faint">
-                      {vital.display}
-                    </p>
-                    <p className="text-md font-semibold tabular text-ink">
-                      {vital.valueNumeric ?? '—'}{' '}
-                      <span className="text-2xs font-normal text-ink-faint">
-                        {vital.valueUnit}
-                      </span>
-                    </p>
-                  </div>
-                ))
+                /*
+                 * The shared grid, which flags an out-of-range reading.
+                 *
+                 * This panel used to print the numbers bare, so a doctor
+                 * consulting could not see that a systolic was 210 — the one
+                 * screen where that matters most. `showAge` is off because
+                 * these are today's and the column is narrow.
+                 */
+                <VitalsGrid vitals={snapshot.data?.latestVitals ?? []} showAge={false} />
               )}
             </PanelBody>
           </Panel>
@@ -437,9 +590,7 @@ export default function ConsultationPage() {
           <DiagnosisPanel
             readOnly={readOnly}
             conditions={snapshot.data?.conditions ?? []}
-            onAdd={(displayText, isChronic) =>
-              addDiagnosis.mutate({ displayText, isChronic })
-            }
+            onAdd={(input) => addDiagnosis.mutate(input)}
             pending={addDiagnosis.isPending}
           />
 
@@ -512,19 +663,46 @@ export default function ConsultationPage() {
                           <span className="token rounded-sm bg-surface px-1.5 py-0.5 text-xs text-ink">
                             {line.frequency}
                           </span>
-                          <span className="text-2xs text-ink-faint">
-                            {line.timingRelativeToFood === 'BEFORE_FOOD'
-                              ? 'Before food'
-                              : line.timingRelativeToFood === 'WITH_FOOD'
-                                ? 'With food'
-                                : 'After food'}
-                          </span>
+                          {/*
+                            Nothing is printed when the timing is null.
+
+                            This used to fall through to "After food" for any
+                            value it did not recognise, including null — so a
+                            line with no timing recorded displayed, and printed,
+                            an instruction nobody gave.
+                          */}
+                          {line.timingRelativeToFood ? (
+                            <span className="text-2xs text-ink-faint">
+                              {line.timingRelativeToFood === 'BEFORE_FOOD'
+                                ? 'Before food'
+                                : line.timingRelativeToFood === 'WITH_FOOD'
+                                  ? 'With food'
+                                  : 'After food'}
+                            </span>
+                          ) : null}
                           {line.durationDays ? (
                             <span className="text-2xs text-ink-faint">
                               {line.durationDays} days
                             </span>
                           ) : null}
+                          {line.quantity ? (
+                            <span className="text-2xs text-ink-faint">
+                              Dispense {line.quantity}
+                            </span>
+                          ) : null}
+                          {!finalised ? (
+                            <button
+                              type="button"
+                              onClick={() => setEditingLine(line)}
+                              className="ml-auto text-2xs font-medium text-accent hover:underline"
+                            >
+                              Change dose
+                            </button>
+                          ) : null}
                         </div>
+                        {line.instructions ? (
+                          <p className="mt-1 text-2xs text-ink-soft">{line.instructions}</p>
+                        ) : null}
                       </li>
                     ))}
                   </ul>
@@ -547,17 +725,72 @@ export default function ConsultationPage() {
           drugName={pendingDrug.name}
           warnings={pendingDrug.warnings}
           onCancel={() => setPendingDrug(null)}
-          onProceed={(reason) =>
-            void commitLine(
-              pendingDrug.name,
-              pendingDrug.molecule,
-              pendingDrug.drug,
-              pendingDrug.warnings,
-              reason,
-            )
-          }
+          onProceed={(reason) => {
+            // Override recorded, now ask the dose. Two questions, in order.
+            setDosing({
+              name: pendingDrug.name,
+              molecule: pendingDrug.molecule,
+              drug: pendingDrug.drug,
+              warnings: pendingDrug.warnings,
+              overrideReason: reason,
+            });
+            setPendingDrug(null);
+          }}
         />
       ) : null}
+
+      <DosageDialog
+        open={dosing !== null}
+        drugName={dosing?.name ?? ''}
+        drug={dosing?.drug ?? null}
+        saving={addLine.isPending}
+        onCancel={() => setDosing(null)}
+        onConfirm={(dose) => {
+          if (!dosing) return;
+          void commitLine(
+            dosing.name,
+            dosing.molecule,
+            dosing.drug,
+            dosing.warnings,
+            dosing.overrideReason,
+            dose,
+          );
+        }}
+      />
+
+      {/*
+        The same dialog, opened on an existing line's values.
+
+        A separate mount rather than one with a mode flag, because the two have
+        different lifecycles: adding resets to defaults on every open, editing
+        has to start from what is already recorded.
+      */}
+      <DosageDialog
+        open={editingLine !== null}
+        drugName={editingLine?.drugDisplayName ?? ''}
+        drug={null}
+        initial={
+          editingLine
+            ? {
+                frequency: editingLine.frequency,
+                timingRelativeToFood: editingLine.timingRelativeToFood,
+                durationDays: editingLine.durationDays,
+                route: editingLine.route,
+                quantity: editingLine.quantity,
+                instructions: editingLine.instructions,
+              }
+            : undefined
+        }
+        saving={reviseDosage.isPending}
+        onCancel={() => setEditingLine(null)}
+        onConfirm={(dose) => {
+          if (!editingLine) return;
+          reviseDosage.mutate(
+            { lineId: editingLine.id, ...dose },
+            { onSuccess: () => setEditingLine(null) },
+          );
+        }}
+      />
 
       <RecordVitalsDialog
         patientId={patientId}
@@ -581,26 +814,29 @@ function DiagnosisPanel({
   pending,
 }: {
   readOnly: boolean;
-  conditions: { id: string; displayText: string; isChronic: boolean }[];
-  onAdd: (displayText: string, isChronic: boolean) => void;
+  conditions: { id: string; displayText: string; isChronic: boolean; code: string | null }[];
+  onAdd: (input: {
+    displayText: string;
+    isChronic: boolean;
+    code?: string | null;
+    codeSystem?: string | null;
+  }) => void;
   pending: boolean;
 }) {
-  const [text, setText] = React.useState('');
+  /*
+   * `chronic` is held outside the picker so a selection can PRE-FILL it.
+   *
+   * Diabetes and hypertension are chronic every single time, and asking on each
+   * visit means the box gets answered carelessly. It stays editable because the
+   * same code can be either — "asthma" in a child who may grow out of it.
+   */
   const [chronic, setChronic] = React.useState(false);
-
-  const submit = (event: React.FormEvent) => {
-    event.preventDefault();
-    if (text.trim().length < 2) return;
-    onAdd(text.trim(), chronic);
-    setText('');
-    setChronic(false);
-  };
 
   return (
     <Panel>
       <PanelHeader
         title="Diagnoses"
-        description="A code is optional. Type the diagnosis as you would write it."
+        description="Search for a code, or just type it. Both are recorded."
       />
       <PanelBody className="flex flex-col gap-3">
         {conditions.length > 0 ? (
@@ -608,35 +844,51 @@ function DiagnosisPanel({
             {conditions.map((condition) => (
               <Badge key={condition.id} tone={condition.isChronic ? 'chronic' : 'neutral'}>
                 {condition.displayText}
+                {/*
+                  The code is shown where there is one, and its absence is left
+                  plain rather than marked. A coded entry is not better care than
+                  an uncoded one — it is more portable — and badging free text as
+                  deficient would push doctors toward picking the nearest wrong
+                  code, which is the one outcome worth avoiding.
+                */}
+                {condition.code ? (
+                  <span className="ml-1 font-normal opacity-70">{condition.code}</span>
+                ) : null}
               </Badge>
             ))}
           </div>
         ) : null}
 
         {!readOnly ? (
-          <form onSubmit={submit} className="flex flex-col gap-2">
-            <div className="flex gap-2">
-              <Input
-                value={text}
-                onChange={(event) => setText(event.target.value)}
-                placeholder="e.g. Acute pharyngitis"
-                aria-label="Add a diagnosis"
-              />
-              <Button type="submit" variant="secondary" loading={pending}>
-                <Plus aria-hidden />
-                Add
-              </Button>
-            </div>
+          <div className="flex flex-col gap-2">
+            <DiagnosisCombobox
+              onSelect={(item) => {
+                onAdd({
+                  displayText: item.displayText,
+                  // The clinic's own default wins unless the doctor has already
+                  // ticked the box themselves.
+                  isChronic: chronic || item.isChronicByDefault,
+                  code: item.code,
+                  codeSystem: item.codeSystem,
+                });
+                setChronic(false);
+              }}
+              onFreeText={(displayText) => {
+                onAdd({ displayText, isChronic: chronic, code: null, codeSystem: null });
+                setChronic(false);
+              }}
+            />
             <label className="flex items-center gap-2 text-2xs text-ink-soft">
               <input
                 type="checkbox"
                 checked={chronic}
                 onChange={(event) => setChronic(event.target.checked)}
                 className="size-3.5 accent-accent"
+                disabled={pending}
               />
               Chronic — pin this to the top of the patient summary
             </label>
-          </form>
+          </div>
         ) : null}
       </PanelBody>
     </Panel>

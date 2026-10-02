@@ -352,10 +352,39 @@ export class WhatsAppAccountService {
   async credential(): Promise<WhatsAppCredential | null> {
     const account = await this.tenantDb.runReadOnly((tx) => this.activeAccount(tx));
     if (!account) return null;
+    return this.toCredential(account);
+  }
 
+  /**
+   * The same credential, for a clinic that is not in request context.
+   *
+   * Background work — the reminder runner — has no request and therefore no
+   * `TenantContext`, so `credential()` above would throw. This is the same read
+   * through `runAs`, which is how every other background path in the product
+   * establishes a scope.
+   *
+   * It exists so credential reading and token decryption stay in one place. The
+   * alternative was the reminder service selecting `whatsapp_account` and
+   * calling `SecretBoxService.open` itself, which is a second copy of the rule
+   * that an empty token means simulated mode rather than an error.
+   */
+  async credentialFor(clinicId: string): Promise<WhatsAppCredential | null> {
+    const account = await this.tenantDb.runAs(clinicId, null, (tx) =>
+      this.activeAccount(tx),
+    );
+    if (!account) return null;
+    return this.toCredential(account);
+  }
+
+  private toCredential(
+    account: typeof schema.whatsappAccount.$inferSelect,
+  ): WhatsAppCredential {
     return {
       wabaId: account.wabaId,
       phoneNumberId: account.phoneNumberId,
+      // Empty rather than null: an empty token is what puts the client into
+      // simulated mode, so a half-configured deployment degrades to "recorded
+      // but not sent" instead of throwing on every message.
       accessToken: this.secrets.open(account.accessTokenEncrypted) ?? '',
     };
   }

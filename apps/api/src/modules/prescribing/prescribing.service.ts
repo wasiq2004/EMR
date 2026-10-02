@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { and, eq, or, sql } from 'drizzle-orm';
 import * as schema from '@emr/db/schema';
+import { expandFrequency } from '@emr/contracts';
 import type { DrugCatalogueItem, MedicationRequest } from '@emr/contracts';
 import { SYSTEM_CLINIC_ID } from '@emr/db/schema';
 import { TenantDb } from '../../common/tenancy/tenant-db.service';
@@ -213,6 +214,80 @@ export class PrescribingService {
       // can show what was flagged and accepted, rather than only what was
       // flagged and refused.
       return { ...serialiseLine(created!), safetyWarningsShown: warnings } as MedicationRequest;
+    });
+  }
+
+  /**
+   * Changes the dose on a line that is already on the prescription.
+   *
+   * THE DRUG IS NOT CHANGEABLE HERE, deliberately. Swapping the medicine on an
+   * existing line would bypass the allergy and duplicate-therapy evaluation that
+   * ran when it was added, and `safetyWarningsShown` would then describe a drug
+   * that is no longer on the line — a record that reads as though the checks
+   * passed for something they never saw. Changing the medicine means removing
+   * the line and adding the right one.
+   *
+   * This exists because the dose was previously unchangeable too: the panel
+   * showed frequency, timing and duration as read-only chips, so a mis-set dose
+   * could only be fixed by deleting the line and starting again.
+   */
+  async reviseDosage(
+    lineId: string,
+    input: {
+      frequency: string;
+      timingRelativeToFood?: 'BEFORE_FOOD' | 'AFTER_FOOD' | 'WITH_FOOD' | null;
+      durationDays?: number | null;
+      quantity?: number | null;
+      instructions?: string | null;
+      route?: string | null;
+    },
+  ) {
+    const ctx = TenantContext.require();
+
+    return this.tenantDb.run(async (tx) => {
+      const [line] = await tx
+        .select()
+        .from(schema.medicationRequest)
+        .where(eq(schema.medicationRequest.id, lineId))
+        .limit(1);
+      if (!line) throw new NotFoundException('That medicine could not be found.');
+
+      const [encounter] = await tx
+        .select()
+        .from(schema.encounter)
+        .where(eq(schema.encounter.id, line.encounterId))
+        .limit(1);
+
+      /*
+       * A signed prescription is immutable.
+       *
+       * The same rule `removeLine` enforces, and for the same reason: the
+       * patient is holding a printed copy and the pharmacy may already have
+       * dispensed against it. A correction to a signed prescription is a new
+       * prescription, not an edit to the old one.
+       */
+      if (encounter?.isFinalized) {
+        throw new ConflictException(
+          'This prescription is signed. Issue a new one rather than changing a dose.',
+        );
+      }
+
+      const [updated] = await tx
+        .update(schema.medicationRequest)
+        .set({
+          frequency: expandFrequency(input.frequency),
+          timingRelativeToFood: input.timingRelativeToFood ?? null,
+          durationDays: input.durationDays ?? null,
+          quantity: input.quantity == null ? null : String(input.quantity),
+          instructions: input.instructions ?? null,
+          route: input.route ?? line.route,
+          version: line.version + 1,
+          updatedBy: ctx.userId,
+        })
+        .where(eq(schema.medicationRequest.id, lineId))
+        .returning();
+
+      return updated!;
     });
   }
 

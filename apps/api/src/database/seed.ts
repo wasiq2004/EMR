@@ -19,6 +19,11 @@ import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import * as schema from '@emr/db/schema';
+import {
+  DIAGNOSIS_CATALOGUE,
+  DIAGNOSIS_CATALOGUE_VERSION,
+  DIAGNOSIS_CODE_SYSTEM,
+} from './diagnosis-catalogue';
 
 const SYSTEM_CLINIC_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -33,6 +38,7 @@ async function main() {
 
   try {
     await seedDrugCatalogue(db);
+    await seedDiagnosisCatalogue(db);
     console.log('Reference data ready.');
   } finally {
     await pool.end();
@@ -56,6 +62,68 @@ type Database = ReturnType<typeof drizzle<typeof schema>>;
  * entries; replacing it with a licensed formulary is a procurement decision
  * rather than a code change.
  */
+/**
+ * The diagnosis codes the typeahead offers.
+ *
+ * Same shape as the drug catalogue and for the same reason: one copy under a
+ * reserved tenant that every clinic reads and none can write, rather than a
+ * list duplicated per clinic.
+ *
+ * IT IS A CONVENIENCE, NOT A CONSTRAINT. `condition.code` is nullable and the
+ * typeahead never refuses an unmatched entry — a doctor who cannot find the code
+ * for what they are looking at writes it down and moves on. Picking the nearest
+ * wrong code is the failure this is designed to avoid, not the behaviour it is
+ * designed to produce.
+ *
+ * On why the list is ~250 codes rather than the planned 1,500, and how to load a
+ * full licensed release instead, see `diagnosis-catalogue.ts`. The short version:
+ * a wrong ICD-10 code travels onto an insurance claim and into the next
+ * clinician's reading, so we seed only codes we are confident of.
+ */
+async function seedDiagnosisCatalogue(db: Database) {
+  const existing = await db.execute<{ count: string }>(sql`
+    SELECT count(*) AS count
+    FROM diagnosis_catalogue_item
+    WHERE clinic_id = ${SYSTEM_CLINIC_ID}::uuid
+  `);
+  if (Number(existing.rows[0]?.count ?? 0) > 0) {
+    console.log('  diagnosis catalogue already present');
+    return;
+  }
+
+  for (const entry of DIAGNOSIS_CATALOGUE) {
+    /*
+     * The search text carries the display, the code and the synonyms together.
+     *
+     * Searching is not the same as recording: "URTI" has to find the entry and
+     * "Acute upper respiratory infection" is what gets written on the
+     * prescription. The code is in there too, so a doctor who knows J02.9 can
+     * type it.
+     */
+    const searchNormalized = [entry.display, entry.code, entry.synonyms ?? '']
+      .join(' ')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    await db.execute(sql`
+      INSERT INTO diagnosis_catalogue_item
+        (clinic_id, code, code_system, display_text, search_normalized,
+         category, is_chronic_by_default, catalogue_version)
+      VALUES (
+        ${SYSTEM_CLINIC_ID}::uuid, ${entry.code}, ${DIAGNOSIS_CODE_SYSTEM},
+        ${entry.display}, ${searchNormalized}, ${entry.category},
+        ${entry.chronic === true}, ${DIAGNOSIS_CATALOGUE_VERSION}
+      )
+      ON CONFLICT (clinic_id, code, display_text) DO NOTHING
+    `);
+  }
+
+  console.log(
+    `  seeded ${DIAGNOSIS_CATALOGUE.length} diagnosis codes under the system tenant`,
+  );
+}
+
 async function seedDrugCatalogue(db: Database) {
   await db.execute(sql`
     INSERT INTO clinic (id, name, slug, timezone, is_active)

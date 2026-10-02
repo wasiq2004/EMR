@@ -16,6 +16,7 @@ import { usePatientSnapshot } from '@/features/patients/api';
 import { AllergyBanner } from '@/features/patients/allergy-banner';
 import { RecordAllergyDialog } from '@/features/patients/record-allergy-dialog';
 import { RecordVitalsDialog } from '@/features/patients/record-vitals-dialog';
+import { VitalsGrid } from '@/features/patients/vitals-grid';
 import { useStartConsultation } from '@/features/queue/api';
 import { useCan, useSession } from '@/lib/session';
 import { formatDate, formatPaiseShort, relativeTime } from '@/lib/format';
@@ -369,41 +370,13 @@ function LatestVitals({ loading, vitals }: { loading: boolean; vitals: Observati
       ) : vitals.length === 0 ? (
         <EmptyState icon={Thermometer} title="No vitals recorded" />
       ) : (
-        <PanelBody className="grid grid-cols-2 gap-3">
-          {vitals.map((vital) => {
-            const abnormal =
-              vital.interpretation === 'HIGH' ||
-              vital.interpretation === 'LOW' ||
-              vital.interpretation === 'CRITICAL';
-            return (
-              <div key={vital.id} className="min-w-0">
-                <p className="text-2xs uppercase tracking-wide text-ink-faint">
-                  {vital.display}
-                </p>
-                <p
-                  className={cn(
-                    'text-lg font-semibold tabular',
-                    abnormal ? 'text-critical' : 'text-ink',
-                  )}
-                >
-                  {vital.valueNumeric ?? vital.valueText ?? '—'}
-                  <span className="ml-1 text-2xs font-normal text-ink-faint">
-                    {vital.valueUnit}
-                  </span>
-                </p>
-                {/* The word, not only the colour. */}
-                {abnormal ? (
-                  <span className="text-2xs font-medium text-critical">
-                    {vital.interpretation === 'HIGH' ? 'Above range' : 'Below range'}
-                  </span>
-                ) : (
-                  <span className="text-2xs text-ink-faint">
-                    {relativeTime(vital.effectiveAt)}
-                  </span>
-                )}
-              </div>
-            );
-          })}
+        <PanelBody>
+          {/*
+            The shared grid. This was a near-copy of the consultation screen's
+            panel that had drifted: it rendered CRITICAL as "Below range", which
+            describes the loudest reading in the system with the wrong word.
+          */}
+          <VitalsGrid vitals={vitals} />
         </PanelBody>
       )}
     </Panel>

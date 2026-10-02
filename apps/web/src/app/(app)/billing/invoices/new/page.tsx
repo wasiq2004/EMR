@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Plus, Search, Trash2 } from 'lucide-react';
 import { computeInvoiceTotals, type PatientSummary, type ServiceItem } from '@emr/contracts';
@@ -15,21 +15,44 @@ import { Panel, PanelBody, PanelHeader, PageHeader } from '@/components/ui/surfa
 import { useToast } from '@/components/ui/toast';
 
 interface Line {
+  /** The service this line bills, when it bills one. Null for an ad-hoc charge. */
+  serviceItemId: string | null;
   description: string;
   quantity: number;
   unitRupees: string;
 }
 
-/** Creating an invoice. Amounts are entered in rupees and stored in paise. */
+/**
+ * Creating an invoice. Amounts are entered in rupees and stored in paise.
+ *
+ * TAKES ITS CONTEXT FROM THE URL — `?patientId=`, `?encounterId=`,
+ * `?appointmentId=`. Reached from the consultation screen and from check-out, so
+ * the person raising it does not search for a patient they are already looking at.
+ *
+ * `encounterId` is the one that matters most and was previously never sent: an
+ * invoice with no encounter is an invoice no visit can find, which is why the
+ * check-out screen could not tell whether a consultation had been billed.
+ */
 export default function NewInvoicePage() {
   const router = useRouter();
   const toast = useToast();
+  const params = useSearchParams();
+
+  const presetPatientId = params.get('patientId');
+  const encounterId = params.get('encounterId');
+  const appointmentId = params.get('appointmentId');
 
   const [term, setTerm] = React.useState('');
   const [patient, setPatient] = React.useState<PatientSummary | null>(null);
-  const [lines, setLines] = React.useState<Line[]>([
-    { description: 'Consultation', quantity: 1, unitRupees: '600' },
-  ]);
+  /*
+   * Starts EMPTY.
+   *
+   * It previously opened with a hardcoded "Consultation · ₹600" line. That price
+   * belonged to nobody — it was invented — and a clinic that did not notice it
+   * would bill six hundred rupees because the form suggested it. Lines come from
+   * the service catalogue or from the person typing.
+   */
+  const [lines, setLines] = React.useState<Line[]>([]);
   const [discountRupees, setDiscountRupees] = React.useState('0');
   const [saving, setSaving] = React.useState(false);
 
@@ -42,14 +65,25 @@ export default function NewInvoicePage() {
     enabled: term.trim().length >= 2 && !patient,
   });
 
+  /* The patient named in the URL, fetched once so the form opens ready to use. */
+  const { data: presetPatient } = useQuery({
+    queryKey: qk.patient(presetPatientId ?? ''),
+    queryFn: () => api.get<PatientSummary>(`/patients/${presetPatientId}`),
+    enabled: Boolean(presetPatientId) && !patient,
+  });
+
+  React.useEffect(() => {
+    if (presetPatient && !patient) setPatient(presetPatient);
+  }, [presetPatient, patient]);
+
   const { data: services } = useQuery({
     queryKey: qk.services,
     queryFn: () =>
-      api.get<{ items: ServiceItem[] }>('/services').catch(() => ({ items: [] })),
+      api.get<{ items: ServiceItem[] }>('/services'),
   });
 
   const priced = lines.map((line) => ({
-    serviceItemId: null,
+    serviceItemId: line.serviceItemId,
     description: line.description,
     quantity: line.quantity,
     unitPricePaise: rupeesToPaise(line.unitRupees),
@@ -68,13 +102,26 @@ export default function NewInvoicePage() {
         '/invoices',
         {
           patientId: patient.id,
+          /*
+           * Linking the invoice to the consultation. Without it the visit cannot
+           * find its own bill, so check-out reports "nothing billed" however many
+           * invoices exist for that patient.
+           */
+          encounterId,
           lineItems: priced,
           discountPaise: rupeesToPaise(discountRupees),
         },
         { idempotencyKey: idempotencyKey() },
       );
       toast.success('Invoice created');
-      router.push(`/billing/invoices/${invoice.id}`);
+      /*
+       * Back to the visit if that is where this started, so a receptionist who
+       * came from check-out lands on the queue rather than deep in billing with
+       * a patient still standing at the counter.
+       */
+      router.push(
+        appointmentId ? '/queue' : `/billing/invoices/${invoice.id}`,
+      );
     } catch {
       toast.error('Could not create the invoice');
     } finally {
@@ -153,7 +200,10 @@ export default function NewInvoicePage() {
                 variant="secondary"
                 type="button"
                 onClick={() =>
-                  setLines((c) => [...c, { description: '', quantity: 1, unitRupees: '' }])
+                  setLines((c) => [
+                  ...c,
+                  { serviceItemId: null, description: '', quantity: 1, unitRupees: '' },
+                ])
                 }
               >
                 <Plus aria-hidden />
@@ -173,6 +223,13 @@ export default function NewInvoicePage() {
                   setLines((c) => [
                     ...c,
                     {
+                      /*
+                       * Carried through to the invoice line. Without it a charge
+                       * is a description and a number — so "how much did we earn
+                       * from follow-ups" has nothing to group on, and the
+                       * service catalogue is decorative.
+                       */
+                      serviceItemId: service.id,
                       description: service.name,
                       quantity: 1,
                       unitRupees: String(service.defaultFeePaise / 100),

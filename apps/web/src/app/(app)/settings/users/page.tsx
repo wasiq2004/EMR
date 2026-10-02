@@ -1,17 +1,20 @@
 'use client';
 
 import * as React from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { ShieldCheck, UserPlus } from 'lucide-react';
+import { UserPlus, Users } from 'lucide-react';
 import { ROLE_LABEL, type StaffUser } from '@emr/contracts';
-import { api } from '@/lib/api-client';
-import { qk } from '@/lib/query-client';
-import { useCan } from '@/lib/session';
+import { useStaff } from '@/features/staff/api';
+import {
+  EditStaffDialog,
+  InviteStaffDialog,
+  ResetStaffPasswordDialog,
+} from '@/features/staff/staff-dialogs';
+import { useCan, useSession } from '@/lib/session';
 import { relativeTime } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Panel, PanelHeader } from '@/components/ui/surface';
-import { Alert, SkeletonRows } from '@/components/ui/feedback';
+import { Panel, PanelBody, PanelHeader } from '@/components/ui/surface';
+import { Alert, EmptyState, SkeletonRows } from '@/components/ui/feedback';
 
 /**
  * Staff and roles.
@@ -22,18 +25,20 @@ import { Alert, SkeletonRows } from '@/components/ui/feedback';
  * calls that out rather than letting the doctor discover it at the moment of
  * signing.
  *
- * Note also that there is no self-service password reset in the system — an
- * administrator resets a password from this screen.
+ * There is no self-service password reset anywhere in this product — no mail
+ * provider is connected, and a reset link that never arrives is worse than none.
+ * An administrator issues a new password from this screen and reads it out.
  */
 export default function StaffSettingsPage() {
   const canManage = useCan('user:create');
+  const session = useSession();
+  const staffQuery = useStaff();
 
-  const { data, isLoading } = useQuery({
-    queryKey: qk.staff,
-    queryFn: () => api.get<{ items: StaffUser[] }>('/users'),
-  });
+  const [inviteOpen, setInviteOpen] = React.useState(false);
+  const [editing, setEditing] = React.useState<StaffUser | null>(null);
+  const [resetting, setResetting] = React.useState<StaffUser | null>(null);
 
-  const staff = data?.items ?? [];
+  const staff = staffQuery.data ?? [];
   const cannotSign = staff.filter(
     (user) => user.role === 'DOCTOR' && !user.medicalRegistrationNumber,
   );
@@ -44,6 +49,13 @@ export default function StaffSettingsPage() {
         <Alert
           tone="warning"
           title={`${cannotSign.length} doctor account${cannotSign.length === 1 ? '' : 's'} cannot sign prescriptions`}
+          action={
+            canManage ? (
+              <Button size="sm" variant="secondary" onClick={() => setEditing(cannotSign[0]!)}>
+                Add the number
+              </Button>
+            ) : null
+          }
         >
           {cannotSign.map((user) => user.fullName).join(', ')} —{' '}
           {cannotSign.length === 1 ? 'this account has' : 'these accounts have'} no
@@ -54,18 +66,34 @@ export default function StaffSettingsPage() {
       <Panel>
         <PanelHeader
           title="Staff"
-          description={`${staff.length} accounts`}
+          description={`${staff.length} account${staff.length === 1 ? '' : 's'}`}
           actions={
             canManage ? (
-              <Button size="sm" variant="primary">
+              <Button size="sm" variant="primary" onClick={() => setInviteOpen(true)}>
                 <UserPlus aria-hidden />
-                Invite
+                Add a staff member
               </Button>
             ) : null
           }
         />
-        {isLoading ? (
+
+        {staffQuery.isLoading ? (
           <SkeletonRows rows={5} />
+        ) : staff.length === 0 ? (
+          <PanelBody>
+            <EmptyState
+              icon={Users}
+              title="No staff yet"
+              description="Add the people who work here and give each one a role. Every account gets its own one-time password."
+              action={
+                canManage ? (
+                  <Button variant="primary" onClick={() => setInviteOpen(true)}>
+                    Add a staff member
+                  </Button>
+                ) : null
+              }
+            />
+          </PanelBody>
         ) : (
           <ul className="divide-y divide-line-soft">
             {staff.map((user) => (
@@ -74,6 +102,13 @@ export default function StaffSettingsPage() {
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-medium text-ink">{user.fullName}</span>
                     <Badge tone="neutral">{ROLE_LABEL[user.role]}</Badge>
+                    {user.id === session.userId ? <Badge tone="info">You</Badge> : null}
+                    {/*
+                      Hidden with the rest of two-factor — owner decision,
+                      2026-09-28. It marked every single account with a warning
+                      badge for a feature nobody can turn on, which trains people
+                      to ignore warning badges.
+
                     {user.mfaEnabled ? (
                       <Badge tone="positive">
                         <ShieldCheck aria-hidden />
@@ -82,6 +117,7 @@ export default function StaffSettingsPage() {
                     ) : (
                       <Badge tone="warning">No two-factor</Badge>
                     )}
+                    */}
                     {!user.isActive ? <Badge tone="neutral">Deactivated</Badge> : null}
                   </div>
                   <p className="mt-0.5 text-2xs text-ink-faint">
@@ -109,10 +145,10 @@ export default function StaffSettingsPage() {
 
                 {canManage ? (
                   <div className="flex shrink-0 gap-2">
-                    <Button size="sm" variant="secondary">
+                    <Button size="sm" variant="secondary" onClick={() => setEditing(user)}>
                       Edit
                     </Button>
-                    <Button size="sm" variant="ghost">
+                    <Button size="sm" variant="ghost" onClick={() => setResetting(user)}>
                       Reset password
                     </Button>
                   </div>
@@ -122,6 +158,10 @@ export default function StaffSettingsPage() {
           </ul>
         )}
       </Panel>
+
+      <InviteStaffDialog open={inviteOpen} onOpenChange={setInviteOpen} />
+      <EditStaffDialog user={editing} onClose={() => setEditing(null)} />
+      <ResetStaffPasswordDialog user={resetting} onClose={() => setResetting(null)} />
     </div>
   );
 }

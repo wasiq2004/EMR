@@ -1,9 +1,25 @@
 import {
-  Body, Controller, Get, Injectable, Module, NotFoundException, Param, Patch, Post,
+  Body,
+  ConflictException,
+  Controller,
+  Get,
+  Injectable,
+  Module,
+  NotFoundException,
+  Param,
+  Patch,
+  Post,
 } from '@nestjs/common';
 import { asc, eq } from 'drizzle-orm';
 import * as schema from '@emr/db/schema';
-import { InviteStaff, type Clinic, type ServiceItem, type StaffUser } from '@emr/contracts';
+import {
+  InviteStaff,
+  SaveLocation,
+  SaveServiceItem,
+  type Clinic,
+  type ServiceItem,
+  type StaffUser,
+} from '@emr/contracts';
 import { TenantDb } from '../../common/tenancy/tenant-db.service';
 import { TenantContext } from '../../common/tenancy/tenant-context';
 import { PasswordService } from '../../common/auth/password.service';
@@ -138,6 +154,28 @@ export class SettingsService {
     const hash = await this.passwords.hash(temporary);
 
     const user = await this.tenantDb.run(async (tx) => {
+      /*
+       * A duplicate email is a CONFLICT, not a server error.
+       *
+       * Without this the unique index raised straight out of the handler and the
+       * administrator saw "Something went wrong at our end" — which is both untrue
+       * and unactionable. The email already being in use is something they can
+       * fix in five seconds, once they are told.
+       */
+      const [clash] = await tx
+        .select({ id: schema.appUser.id, isActive: schema.appUser.isActive })
+        .from(schema.appUser)
+        .where(eq(schema.appUser.email, String(input.email).toLowerCase()))
+        .limit(1);
+
+      if (clash) {
+        throw new ConflictException(
+          clash.isActive
+            ? 'Somebody at this clinic already uses that email address.'
+            : 'A deactivated account already uses that email address. Reactivate it from the staff list rather than creating a second.',
+        );
+      }
+
       const [created] = await tx
         .insert(schema.appUser)
         .values({
@@ -227,10 +265,108 @@ export class SettingsService {
     return rows.map((r) => ({ ...r, defaultFeePaise: Number(r.defaultFeePaise) })) as ServiceItem[];
   }
 
+  /**
+   * Creates or updates a billable service.
+   *
+   * RETIRED, NEVER DELETED. Invoices raised last year reference these rows by id
+   * and have to keep resolving to a name — a deleted service turns a historical
+   * invoice into a line that says nothing.
+   */
+  async saveService(input: Record<string, unknown>) {
+    const ctx = TenantContext.require();
+
+    const values = {
+      name: String(input.name).trim(),
+      code: (input.code as string) || null,
+      description: (input.description as string) || null,
+      defaultFeePaise: Number(input.defaultFeePaise ?? 0),
+      hsnSacCode: (input.hsnSacCode as string) || null,
+      taxRateBps: Number(input.taxRateBps ?? 0),
+      defaultDurationMinutes: input.defaultDurationMinutes
+        ? Number(input.defaultDurationMinutes)
+        : null,
+      practitionerId: (input.practitionerId as string) || null,
+      isActive: input.isActive !== false,
+      displayOrder: Number(input.displayOrder ?? 0),
+      updatedBy: ctx.userId,
+    };
+
+    const row = await this.tenantDb.run(async (tx) => {
+      if (input.id) {
+        const [updated] = await tx
+          .update(schema.serviceItem)
+          .set(values)
+          .where(eq(schema.serviceItem.id, String(input.id)))
+          .returning();
+        if (!updated) throw new NotFoundException('That service could not be found.');
+        return updated;
+      }
+      const [created] = await tx
+        .insert(schema.serviceItem)
+        .values({ ...values, clinicId: ctx.clinicId, createdBy: ctx.userId })
+        .returning();
+      return created!;
+    });
+
+    return { ...row, defaultFeePaise: Number(row.defaultFeePaise) };
+  }
+
   async locations() {
     return this.tenantDb.runReadOnly((tx) =>
       tx.select().from(schema.clinicLocation).orderBy(asc(schema.clinicLocation.name)),
     );
+  }
+
+  /**
+   * Creates or updates a location.
+   *
+   * Exactly one location is primary. Promoting one demotes the rest in the same
+   * transaction, because two primaries is a state nothing downstream knows how to
+   * read and it appears the moment someone ticks the box twice.
+   */
+  async saveLocation(input: Record<string, unknown>) {
+    const ctx = TenantContext.require();
+
+    /*
+     * Name, city, state, pincode and the two flags — that is the whole table.
+     * A location does not carry a street address or a phone of its own; those
+     * live on `clinic`, and duplicating them here would give a clinic two
+     * addresses that could disagree.
+     */
+    const values = {
+      name: String(input.name).trim(),
+      city: (input.city as string) || null,
+      state: (input.state as string) || null,
+      pincode: (input.pincode as string) || null,
+      isPrimary: input.isPrimary === true,
+      isActive: input.isActive !== false,
+      updatedBy: ctx.userId,
+    };
+
+    return this.tenantDb.run(async (tx) => {
+      if (values.isPrimary) {
+        await tx
+          .update(schema.clinicLocation)
+          .set({ isPrimary: false, updatedBy: ctx.userId })
+          .where(eq(schema.clinicLocation.isPrimary, true));
+      }
+
+      if (input.id) {
+        const [updated] = await tx
+          .update(schema.clinicLocation)
+          .set(values)
+          .where(eq(schema.clinicLocation.id, String(input.id)))
+          .returning();
+        if (!updated) throw new NotFoundException('That location could not be found.');
+        return updated;
+      }
+
+      const [created] = await tx
+        .insert(schema.clinicLocation)
+        .values({ ...values, clinicId: ctx.clinicId, createdBy: ctx.userId })
+        .returning();
+      return created!;
+    });
   }
 
   async consentsFor(patientId: string) {
@@ -307,6 +443,22 @@ class SettingsController {
   @Get('locations')
   async locations() {
     return { items: await this.settings.locations() };
+  }
+
+  @RequirePermission('clinic:update')
+  @Audit('SERVICE_SAVED', 'clinic')
+  @Post('services')
+  saveService(@Body() body: unknown) {
+    const input = parseBody(SaveServiceItem, body);
+    return this.settings.saveService(input as never);
+  }
+
+  @RequirePermission('clinic:update')
+  @Audit('LOCATION_SAVED', 'clinic')
+  @Post('locations')
+  saveLocation(@Body() body: unknown) {
+    const input = parseBody(SaveLocation, body);
+    return this.settings.saveLocation(input as never);
   }
 
   @RequirePermission('consent:read')

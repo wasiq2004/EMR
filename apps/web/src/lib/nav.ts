@@ -20,6 +20,7 @@ import {
   Inbox,
   LayoutGrid,
   ListChecks,
+  ListOrdered,
   MessageSquare,
   Settings,
   ShieldCheck,
@@ -137,9 +138,21 @@ const ALL_SECTIONS: NavSection[] = [
         badgeKey: 'queue',
       },
       {
-        label: 'Appointments',
-        href: '/appointments',
+        label: 'Calendar',
+        href: '/calendar',
         icon: CalendarDays,
+        permission: 'appointment:read',
+      },
+      /*
+       * The list survives alongside the calendar rather than being replaced by
+       * it. A grid is how you find a free slot; a list is how you answer "who is
+       * coming on the 14th" and how you work through a day on a phone at the
+       * counter. They are different questions and the list is better at its one.
+       */
+      {
+        label: 'Appointment list',
+        href: '/appointments',
+        icon: ListOrdered,
         permission: 'appointment:read',
       },
     ],
@@ -472,6 +485,37 @@ export const SETTINGS_LINKS: SettingsLink[] = [
     href: '/settings/locations',
     permission: 'clinic:read',
     description: 'Consulting rooms and branch sites',
+  },
+  {
+    label: 'Follow-up reminders',
+    href: '/settings/reminders',
+    /*
+     * `clinic:read`, so reception can see what the clinic sends and whether a
+     * reminder reached a patient. The page itself disables every control without
+     * `clinic:update` — the API gates saving on that, and offering a form whose
+     * save is refused is a door onto a wall.
+     */
+    permission: 'clinic:read',
+    description: 'Whether follow-ups are reminded, when, and what went out.',
+  },
+  {
+    label: 'Doctor schedules',
+    href: '/settings/schedules',
+    /*
+     * `clinic:update`, not `appointment:read`.
+     *
+     * The page's headline action is rewriting a doctor's working week, which the
+     * API gates on `clinic:update` — reception should not be able to do it. It
+     * was listed under `appointment:read`, so the front desk was offered a page
+     * on which every save would be refused: a door that opens onto a wall.
+     *
+     * Recording that a doctor is off next Tuesday is different, and is front-desk
+     * work — `appointment:update` on the API. It belongs next to the calendar
+     * rather than in settings, and until it is there the page is an
+     * administrator's.
+     */
+    permission: 'clinic:update',
+    description: 'When each doctor works, and the days they do not.',
   },
   {
     label: 'Staff and roles',

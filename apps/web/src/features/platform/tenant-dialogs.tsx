@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { FEATURES, resolveFeatures } from '@emr/contracts';
 import { usePlans, useResetClinicAdmin, useSetFeatures } from './api';
-import { CredentialReveal } from './credential-reveal';
+import { CredentialReveal } from '@/components/ui/credential-reveal';
 import { ApiError } from '@/lib/api-client';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';

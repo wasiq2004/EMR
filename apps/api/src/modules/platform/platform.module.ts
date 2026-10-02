@@ -23,6 +23,7 @@ import { UsageAggregator } from './usage-aggregator.service';
 import { PlatformAdminService } from './platform-admin.service';
 import { PlatformSupportService } from './platform-support.service';
 import { platformDbProviders } from './platform-db.service';
+import { ClinicDirectoryService } from './clinic-directory.service';
 import {
   PLATFORM_COOKIE,
   PlatformGuard,
@@ -486,7 +487,16 @@ export class PlatformController {
     PlatformSupportService,
     PlatformGuard,
     UsageAggregator,
+    ClinicDirectoryService,
   ],
-  exports: [UsageAggregator],
+  /*
+   * `ClinicDirectoryService` is exported; the raw platform connection is not.
+   *
+   * Background work across every tenant needs a clinic list and `emr_app`
+   * cannot produce one. Exporting the BYPASSRLS connection itself would spread
+   * it through the codebase, so what leaves this module is one method returning
+   * one column.
+   */
+  exports: [UsageAggregator, ClinicDirectoryService],
 })
 export class PlatformModule {}

@@ -4,7 +4,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { LogOut, Menu, Settings, UserRound, X } from 'lucide-react';
+import { LogOut, Menu, Settings, X } from 'lucide-react';
 import { ROLE_LABEL } from '@emr/contracts';
 import { ThemeSwitcher } from './theme-switcher';
 import { api } from '@/lib/api-client';
@@ -138,6 +138,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           is surfaced rather than enforced silently, so nobody is locked out
           mid-consultation by a deadline they never saw.
         */}
+        {/*
+          Hidden with the rest of two-factor — owner decision, 2026-09-28. This
+          banner counted down to a deadline that never arrives, on every screen,
+          for every doctor and administrator. See settings/account for what to
+          undo when enrolment is built.
+
         {!session.mfaEnabled && session.mfaGraceDaysRemaining !== null ? (
           <div className="border-b border-warning-line bg-warning-soft px-4 py-1.5 text-xs text-warning">
             <UserRound className="mr-1.5 inline size-3.5 align-text-bottom" aria-hidden />
@@ -147,6 +153,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Link>
           </div>
         ) : null}
+        */}
 
         <main id="main" className="min-w-0 flex-1 px-4 py-5 lg:px-6">
           {children}

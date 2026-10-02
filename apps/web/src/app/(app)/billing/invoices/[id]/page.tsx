@@ -39,22 +39,38 @@ export default function InvoicePage() {
   const [method, setMethod] = React.useState('CASH');
   const [reference, setReference] = React.useState('');
 
+  /**
+   * One key per payment the receptionist is entering, not one per attempt.
+   *
+   * It lives in a ref rather than being generated inside `mutationFn`, and that
+   * is the whole point. A key minted per attempt is not an idempotency key at
+   * all: the retry after a timeout carries a different one, the server sees a
+   * second distinct payment, and the patient is charged twice — which is the
+   * exact failure the key exists to prevent. This one is minted once and
+   * replaced only after the payment lands, so every retry of the same ₹300
+   * resolves to the same row.
+   */
+  const paymentKey = React.useRef(idempotencyKey());
+
   const pay = useMutation({
     mutationFn: () =>
-      api.post(
-        `/invoices/${params.id}/payments`,
-        {
-          amountPaise: rupeesToPaise(amount),
-          method,
-          referenceNumber: reference.trim() || null,
-        },
-        { idempotencyKey: idempotencyKey() },
-      ),
+      // In the BODY. `RecordPayment` requires it there, and sending it only as
+      // an `Idempotency-Key` header — which nothing on the server reads — made
+      // every payment fail validation with a 422. The front desk could not take
+      // money at all.
+      api.post(`/invoices/${params.id}/payments`, {
+        amountPaise: rupeesToPaise(amount),
+        method,
+        referenceNumber: reference.trim() || null,
+        idempotencyKey: paymentKey.current,
+      }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qk.invoice(params.id) });
       void queryClient.invalidateQueries({ queryKey: ['invoices'] });
       setAmount('');
       setReference('');
+      // The next payment against this invoice is a different payment.
+      paymentKey.current = idempotencyKey();
       toast.success('Payment recorded');
     },
   });

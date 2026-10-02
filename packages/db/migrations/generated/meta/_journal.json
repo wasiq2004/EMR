@@ -36,6 +36,41 @@
       "when": 1790495696324,
       "tag": "0004_pharmacy_and_research",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790941057689,
+      "tag": "0005_checkout",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790942109349,
+      "tag": "0006_availability",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790943574877,
+      "tag": "0007_payment_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790964362251,
+      "tag": "0008_diagnosis_catalogue",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790966088762,
+      "tag": "0009_scheduled_reminder",
+      "breakpoints": true
     }
   ]
 }

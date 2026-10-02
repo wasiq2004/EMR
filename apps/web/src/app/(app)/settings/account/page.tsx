@@ -1,7 +1,6 @@
 'use client';
 
 import * as React from 'react';
-import { ShieldCheck, Smartphone } from 'lucide-react';
 import { ROLE_LABEL } from '@emr/contracts';
 import { useSession } from '@/lib/session';
 import { Badge } from '@/components/ui/badge';
@@ -9,7 +8,6 @@ import { Button } from '@/components/ui/button';
 import { Field, Input } from '@/components/ui/field';
 import { DataList, Panel, PanelBody, PanelHeader } from '@/components/ui/surface';
 import { ThemeSwitcher } from '@/components/layout/theme-switcher';
-import { Alert } from '@/components/ui/feedback';
 import { useToast } from '@/components/ui/toast';
 
 /**
@@ -67,6 +65,22 @@ export default function AccountSettingsPage() {
         </PanelBody>
       </Panel>
 
+      {/*
+       * TWO-FACTOR IS HIDDEN, NOT REMOVED. Owner decision, 2026-09-28.
+       *
+       * The enrolment flow was never built: `POST /auth/mfa/verify` deliberately
+       * answers "not yet available on this deployment". So this panel offered a
+       * button that could not work, beside a countdown to a deadline that never
+       * arrives — which is worse than showing nothing, because it tells a doctor
+       * they are about to be locked out of a system that has no way to let them
+       * back in.
+       *
+       * TO BRING IT BACK: build TOTP enrolment behind `/auth/mfa/*`, then delete
+       * these comment markers. The schema already carries `mfa_enabled` and
+       * `mfa_secret_encrypted`, the session already exposes
+       * `mfaGraceDaysRemaining`, and `MFA_GRACE_DAYS` is already configurable —
+       * nothing below needs rewriting, only unhiding.
+       *
       <Panel>
         <PanelHeader
           title="Two-factor sign-in"
@@ -103,6 +117,7 @@ export default function AccountSettingsPage() {
           </Button>
         </PanelBody>
       </Panel>
+      */}
 
       <Panel>
         <PanelHeader title="Change your password" />

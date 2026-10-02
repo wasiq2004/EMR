@@ -9,12 +9,32 @@ code.
 
 ## Run it
 
-You need Docker and about four minutes on a cold build.
+You need Docker and about four minutes on a cold build. On a Mac, follow
+[docs/running-on-macos.md](docs/running-on-macos.md) instead — it covers the
+prerequisites, hot reload and the failure modes specific to Docker Desktop.
 
 ```bash
 cp .env.example .env
-node -e "const c=require('crypto');for(const k of ['JWT_SECRET','APP_DB_PASSWORD','WORKER_DB_PASSWORD','READONLY_DB_PASSWORD','POSTGRES_PASSWORD'])console.log(k+'='+c.randomBytes(48).toString('base64url'))"
-# paste those five lines over the CHANGE_ME values in .env
+
+# Generates all SEVEN secrets and writes them into .env. Compose refuses to
+# start without ENCRYPTION_KEY, JWT_SECRET, APP_DB_PASSWORD or
+# PLATFORM_DB_PASSWORD, so a generator that emits five of them does not work.
+node -e '
+const c = require("crypto"), fs = require("fs");
+const keys = ["ENCRYPTION_KEY", "JWT_SECRET", "APP_DB_PASSWORD", "WORKER_DB_PASSWORD",
+              "PLATFORM_DB_PASSWORD", "READONLY_DB_PASSWORD", "POSTGRES_PASSWORD"];
+let env = fs.readFileSync(".env", "utf8");
+for (const k of keys) {
+  env = env.replace(new RegExp("^" + k + "=.*$", "m"),
+                    k + "=" + c.randomBytes(48).toString("base64url"));
+}
+fs.writeFileSync(".env", env);
+console.log("Wrote " + keys.length + " secrets into .env");
+'
+
+# Must print nothing. The ^ and = match a real assignment rather than the
+# CHANGE_ME mentioned in the comment at the top of the file.
+grep -E "^[A-Z_]+=CHANGE_ME" .env
 
 docker compose up --build
 ```
@@ -22,8 +42,12 @@ docker compose up --build
 Nothing can be signed into yet: there are no clinics and no accounts. Create
 one.
 
+Run it inside the api container. That container already holds the owner
+connection; on the host the script falls back to `localhost:5432` with a default
+password, and this stack publishes Postgres on `5433` with a generated one.
+
 ```bash
-pnpm --filter @emr/api provision \
+docker compose exec api node dist/database/provision.js \
   --name "Sunrise Family Clinic" \
   --slug sunrise \
   --admin-email owner@sunriseclinic.in \

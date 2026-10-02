@@ -212,3 +212,149 @@ export function windowRemainingMs(windowExpiresAt: string | null, now = Date.now
 export function isWindowOpen(windowExpiresAt: string | null, now = Date.now()): boolean {
   return windowRemainingMs(windowExpiresAt, now) > 0;
 }
+
+/* ------------------------------------------------------------------------- *
+ * Scheduled reminders
+ * ------------------------------------------------------------------------- */
+
+export const ReminderKind = z.enum(['FOLLOW_UP', 'APPOINTMENT']);
+export type ReminderKind = z.infer<typeof ReminderKind>;
+
+export const ReminderChannel = z.enum(['WHATSAPP', 'EMAIL']);
+export type ReminderChannel = z.infer<typeof ReminderChannel>;
+
+export const ReminderStatus = z.enum([
+  'PENDING',
+  'SENDING',
+  'SENT',
+  'FAILED',
+  'SKIPPED',
+  'CANCELLED',
+]);
+export type ReminderStatus = z.infer<typeof ReminderStatus>;
+
+export const REMINDER_STATUS_LABEL: Record<ReminderStatus, string> = {
+  PENDING: 'Scheduled',
+  SENDING: 'Sending',
+  SENT: 'Sent',
+  FAILED: 'Failed',
+  /** Correctly not sent — no consent, or the patient already booked. */
+  SKIPPED: 'Not needed',
+  CANCELLED: 'Cancelled',
+};
+
+export const REMINDER_KIND_LABEL: Record<ReminderKind, string> = {
+  FOLLOW_UP: 'Follow-up',
+  APPOINTMENT: 'Appointment',
+};
+
+/**
+ * One reminder, as the log shows it.
+ *
+ * `skipReason` and `lastError` are separate fields because they are separate
+ * facts. "The patient never consented to WhatsApp" is a correct outcome and
+ * "the provider rejected the number" is a fault; collapsing them into one
+ * message makes a working system look broken and buries the real failures.
+ */
+export const ScheduledReminder = z.object({
+  id: Uuid,
+  patientId: Uuid,
+  patientName: z.string(),
+  patientMobile: z.string().nullable(),
+  kind: ReminderKind,
+  encounterId: Uuid.nullable(),
+  appointmentId: Uuid.nullable(),
+  dueAt: IsoDateTime,
+  channel: ReminderChannel,
+  status: ReminderStatus,
+  attempts: z.number().int(),
+  lastError: z.string().nullable(),
+  sentAt: IsoDateTime.nullable(),
+  communicationId: Uuid.nullable(),
+  notifyClinic: z.boolean(),
+});
+export type ScheduledReminder = z.infer<typeof ScheduledReminder>;
+
+/**
+ * What `POST /jobs/run-due` reports back.
+ *
+ * Counted rather than listed, because the caller is a cron line and what it
+ * needs is an exit status and a number for the log. The log screen is where
+ * anybody looks at individual reminders.
+ *
+ * `claimed` is reported separately from `sent` on purpose: claimed-but-not-sent
+ * is the shape of a run that died partway, and a response that only said "sent:
+ * 3" would make that indistinguishable from a quiet night.
+ */
+export const RunDueResult = z.object({
+  claimed: z.number().int(),
+  sent: z.number().int(),
+  skipped: z.number().int(),
+  failed: z.number().int(),
+  /** Rows left in SENDING from a previous run that died, recovered this time. */
+  recovered: z.number().int(),
+});
+export type RunDueResult = z.infer<typeof RunDueResult>;
+
+/**
+ * The clinic's reminder settings, held in `clinic.settings` JSONB.
+ *
+ * JSONB rather than columns because these change per release and carry no
+ * referential integrity — the same reason the rest of `settings` is there.
+ */
+export const ReminderSettings = z.object({
+  /**
+   * Whether follow-up reminders are created at all.
+   *
+   * Off by default. A clinic that has not connected WhatsApp and has not thought
+   * about what its patients consented to should not start messaging them because
+   * the feature shipped.
+   */
+  followUpEnabled: z.boolean().default(false),
+
+  /**
+   * How long before the follow-up date the reminder goes out.
+   *
+   * One day by default. A reminder that arrives on the morning of is too late to
+   * rearrange a day around, and one a week early is forgotten by the time it
+   * matters.
+   */
+  leadTimeDays: z.number().int().min(0).max(14).default(1),
+
+  /**
+   * The hour a reminder may first go out, in the clinic's own timezone.
+   *
+   * QUIET HOURS ARE NOT POLITENESS, they are whether the clinic gets blocked. A
+   * WhatsApp business number that messages people at 3am collects "report
+   * business" taps, and Meta's quality rating is what decides whether the
+   * clinic's messages are delivered at all. Defaults to a 9am–8pm window.
+   */
+  quietHoursStart: z.number().int().min(0).max(23).default(9),
+  quietHoursEnd: z.number().int().min(0).max(23).default(20),
+
+  /**
+   * A copy to the clinic's own number.
+   *
+   * Off by default, and a deliberate choice rather than an oversight: a clinic
+   * copied on every patient reminder has a phone it cannot use, and it is the
+   * patient's appointment rather than the clinic's. Audited when on, because it
+   * means a patient's name and appointment leave the record to a second number.
+   */
+  notifyClinicNumber: z.boolean().default(false),
+  /** Where the copy goes. E.164. Required when `notifyClinicNumber` is on. */
+  clinicNotifyMobileE164: z.string().nullable().default(null),
+});
+export type ReminderSettings = z.infer<typeof ReminderSettings>;
+
+export const REMINDER_SETTINGS_DEFAULTS: ReminderSettings = ReminderSettings.parse({});
+
+export const SaveReminderSettings = ReminderSettings.partial().refine(
+  (v) =>
+    !v.notifyClinicNumber ||
+    (v.clinicNotifyMobileE164 != null && /^\+[1-9]\d{7,14}$/.test(v.clinicNotifyMobileE164)),
+  {
+    message: 'Give the number the copy should go to, with its country code',
+    path: ['clinicNotifyMobileE164'],
+  },
+);
+export type SaveReminderSettings = z.infer<typeof SaveReminderSettings>;

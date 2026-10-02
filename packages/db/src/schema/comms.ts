@@ -33,6 +33,9 @@ import {
   communicationStatusEnum,
   conversationStatusEnum,
   primaryKeyColumn,
+  reminderChannelEnum,
+  reminderKindEnum,
+  reminderStatusEnum,
   tenantPolicy,
   whatsappMessageKindEnum,
 } from './shared';
@@ -399,5 +402,149 @@ export const shareLink = pgTable(
     index('share_link_clinic_document_idx').on(t.clinicId, t.documentId),
     index('share_link_expiry_idx').on(t.expiresAt).where(sql`revoked_at IS NULL`),
     tenantPolicy('share_link'),
+  ],
+).enableRLS();
+
+/* ------------------------------------------------------------------------- *
+ * ScheduledReminder — work with a due date, claimed before it is done
+ * ------------------------------------------------------------------------- */
+
+/**
+ * One reminder, waiting for its time.
+ *
+ * WHY A TABLE AND NOT A QUEUE. There is no Redis-backed job runner in this
+ * product and adding one for this would be the wrong trade: a clinic reminder is
+ * due in three days, not three seconds, and the thing that must never happen is
+ * sending it twice. A row with a status is inspectable — a receptionist asking
+ * "did the reminder go out?" gets an answer from the same screen that shows the
+ * message — and it survives a restart without any broker to keep running. The
+ * scheduler is a cron line calling `POST /jobs/run-due`.
+ *
+ * THE CLAIM IS THE WHOLE DESIGN. `run-due` takes rows with
+ * `UPDATE ... WHERE status = 'PENDING'` and `FOR UPDATE SKIP LOCKED` before it
+ * sends anything, so two overlapping cron runs — which is what happens the first
+ * time a send is slow — cannot both pick up the same row. The send itself then
+ * carries an idempotency key derived from this row's id, so even a claim that
+ * somehow raced cannot produce two messages.
+ *
+ * WHAT IT IS NOT. It is not a general job table. Everything here is "tell
+ * somebody something at a time", and the three columns that would make it
+ * general — a payload blob, a handler name, a retry policy — are deliberately
+ * absent. A follow-up reminder and an appointment reminder differ by `kind` and
+ * by nothing else.
+ */
+export const scheduledReminder = pgTable(
+  'scheduled_reminder',
+  {
+    id: primaryKeyColumn(),
+    clinicId: clinicIdColumn(),
+    patientId: uuid('patient_id').notNull(),
+
+    /**
+     * What this reminder is for.
+     *
+     * `FOLLOW_UP` comes from a signed consultation's `follow_up_after_days`.
+     * `APPOINTMENT` is a future kind for the day-before nudge; it is in the enum
+     * now so adding it later is not a migration of this column.
+     */
+    kind: reminderKindEnum('kind').notNull(),
+
+    /** The consultation that asked for it, where there was one. */
+    encounterId: uuid('encounter_id'),
+    /** The appointment being reminded about, for `APPOINTMENT`. */
+    appointmentId: uuid('appointment_id'),
+
+    /**
+     * When it becomes sendable, as an instant.
+     *
+     * Computed from the clinic's own timezone and its quiet-hours window at
+     * scheduling time, not at send time — so the row says exactly when it will
+     * go out and a clinic changing its hours next month does not retroactively
+     * move reminders already promised to patients.
+     */
+    dueAt: timestamp('due_at', { withTimezone: true }).notNull(),
+
+    channel: reminderChannelEnum('channel').notNull().default('WHATSAPP'),
+
+    status: reminderStatusEnum('status').notNull().default('PENDING'),
+
+    /**
+     * Set the instant a runner claims the row, before any sending happens.
+     *
+     * Also the stuck-work signal: a row in `SENDING` with a `claimed_at` an hour
+     * old is a runner that died mid-send, and that is a different problem from a
+     * row that failed. Without this they are indistinguishable.
+     */
+    claimedAt: timestamp('claimed_at', { withTimezone: true }),
+
+    attempts: integer('attempts').notNull().default(0),
+    /**
+     * Why the last attempt failed, in words a receptionist can act on.
+     *
+     * Kept on the row rather than only in a log, because the question is always
+     * asked about one patient — "why didn't Mrs Rao get hers" — and an answer
+     * that requires grepping a log file is an answer nobody gets.
+     */
+    lastError: text('last_error'),
+
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+
+    /**
+     * The message that was actually sent.
+     *
+     * The reminder is the intention; the `communication` row is the delivery and
+     * owns the lifecycle, the provider id and the delivery receipt. Keeping them
+     * separate means a reminder can be skipped without a message existing, and a
+     * message can be read and reported on without knowing it began as a
+     * reminder.
+     */
+    communicationId: uuid('communication_id'),
+
+    /**
+     * Whether a copy goes to the clinic's own number.
+     *
+     * Per-reminder rather than read from settings at send time, so turning the
+     * setting off does not silently change what was already scheduled — and so
+     * the row records what was actually intended. Off by default: a clinic
+     * copying itself on every patient reminder is a clinic whose phone becomes
+     * unusable, and it is the patient's appointment, not the clinic's.
+     */
+    notifyClinic: boolean('notify_clinic').notNull().default(false),
+
+    ...auditColumns(),
+  },
+  (t) => [
+    foreignKey({ columns: [t.clinicId], foreignColumns: [clinic.id] }).onDelete('restrict'),
+    foreignKey({ columns: [t.patientId], foreignColumns: [patient.id] }).onDelete('restrict'),
+
+    /*
+     * The due-work index, which is the only hot read on this table.
+     *
+     * Partial on PENDING, because that is the only status `run-due` looks at and
+     * the table is otherwise almost entirely history. A clinic three years in
+     * has tens of thousands of SENT rows and a handful of pending ones; an index
+     * covering all of them would be mostly dead weight on every scan.
+     */
+    index('scheduled_reminder_due_idx')
+      .on(t.clinicId, t.dueAt)
+      .where(sql`status = 'PENDING'`),
+
+    /** "What has this patient been sent", which is how the question is asked. */
+    index('scheduled_reminder_patient_idx').on(t.clinicId, t.patientId, t.dueAt.desc()),
+
+    /*
+     * One live reminder per encounter per kind.
+     *
+     * Signing a consultation schedules a follow-up reminder. Amending it, or any
+     * other path that reaches the same code twice, must not schedule a second —
+     * the patient would get two identical messages and nobody would be able to
+     * say why. Partial on the statuses that are still going to produce a
+     * message, so a CANCELLED reminder does not block rescheduling a new one.
+     */
+    uniqueIndex('scheduled_reminder_encounter_uq')
+      .on(t.encounterId, t.kind)
+      .where(sql`encounter_id IS NOT NULL AND status IN ('PENDING', 'SENDING', 'SENT')`),
+
+    tenantPolicy('scheduled_reminder'),
   ],
 ).enableRLS();

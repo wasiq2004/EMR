@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { ClinicalController } from './clinical.controller';
 import { ClinicalService } from './clinical.service';
 import { PharmacyModule } from '../pharmacy/pharmacy.module';
+import { RemindersModule } from '../reminders/reminders.module';
 
 /**
  * `forwardRef` on PharmacyModule.
@@ -13,7 +14,7 @@ import { PharmacyModule } from '../pharmacy/pharmacy.module';
  * have to know about. The forward reference makes the order irrelevant.
  */
 @Module({
-  imports: [forwardRef(() => PharmacyModule)],
+  imports: [forwardRef(() => PharmacyModule), forwardRef(() => RemindersModule)],
   controllers: [ClinicalController],
   providers: [ClinicalService],
   exports: [ClinicalService],

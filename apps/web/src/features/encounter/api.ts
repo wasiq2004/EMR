@@ -8,6 +8,7 @@ import type {
   EncounterDraft,
   InternalNote,
   MedicationRequest,
+  ReviseDosage,
 } from '@emr/contracts';
 import { ApiError, api, idempotencyKey } from '@/lib/api-client';
 import { qk } from '@/lib/query-client';
@@ -33,6 +34,25 @@ export function useAddPrescriptionLine(encounterId: string) {
   return useMutation({
     mutationFn: (input: Record<string, unknown>) =>
       api.post<MedicationRequest>(`/encounters/${encounterId}/prescriptions`, input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qk.prescriptions(encounterId) });
+    },
+  });
+}
+
+/**
+ * Changes the dose on a line already on the prescription.
+ *
+ * Only the dose — the drug is not editable, because swapping the medicine would
+ * slide past the allergy and duplicate-therapy checks that ran when the line was
+ * added. The server enforces that; this is just the call.
+ */
+export function useReviseDosage(encounterId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ lineId, ...input }: ReviseDosage & { lineId: string }) =>
+      api.patch(`/prescriptions/${lineId}`, input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qk.prescriptions(encounterId) });
     },
@@ -73,8 +93,21 @@ export function useAddDiagnosis(encounterId: string, patientId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (input: { displayText: string; isChronic: boolean }) =>
-      api.post('/conditions', { ...input, encounterId, patientId }),
+    /*
+     * `code` and `codeSystem` are optional and that is the whole design.
+     *
+     * A diagnosis picked from the catalogue carries both; one typed in the
+     * doctor's own words carries neither, and is a complete record either way.
+     * `RecordCondition` has always defaulted them to null — what was missing was
+     * any way for this screen to send them, so every diagnosis the product has
+     * ever recorded was uncoded.
+     */
+    mutationFn: (input: {
+      displayText: string;
+      isChronic: boolean;
+      code?: string | null;
+      codeSystem?: string | null;
+    }) => api.post('/conditions', { ...input, encounterId, patientId }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qk.encounter(encounterId) });
       void queryClient.invalidateQueries({ queryKey: qk.snapshot(patientId) });

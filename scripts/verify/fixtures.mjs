@@ -99,6 +99,45 @@ async function up() {
     );
     const clinicId = clinic.rows[0].id;
 
+    /*
+     * A subscription with EVERY MODULE ON.
+     *
+     * Without this the fixture clinic has no plan, so `FeatureGuard` resolves
+     * every flag to off and the suites fail with 403 on billing, reports,
+     * documents, the inbox, WhatsApp, exports and broadcast previews — which
+     * looks like a broken product rather than an unprovisioned tenant.
+     *
+     * The flags are written as a feature OVERRIDE rather than by pointing at a
+     * catalogue plan, deliberately: these suites test clinic behaviour, and
+     * binding them to `clinic-plus` would make them fail the day somebody edits
+     * that plan's price or its module list. The gate itself is tested separately
+     * in `platform.sh`, which is where a 403 is the expected answer.
+     */
+    const allFeatures = JSON.stringify(
+      Object.fromEntries(
+        [
+          'whatsapp',
+          'broadcasts',
+          'teleconsultation',
+          'documents',
+          'billing',
+          'reports',
+          'dataPortability',
+          'multiLocation',
+          'pharmacy',
+          'analytics',
+        ].map((key) => [key, true]),
+      ),
+    );
+
+    await pool.query(
+      `INSERT INTO subscription (clinic_id, plan, status, monthly_price_paise,
+                                 max_practitioners, included_messages_per_month,
+                                 feature_overrides)
+       VALUES ($1, 'verification', 'ACTIVE', 0, NULL, NULL, $2::jsonb)`,
+      [clinicId, allFeatures],
+    );
+
     // One account per role, so role separation can be asserted properly.
     const staff = [
       ['OWNER_ADMIN', `owner@${domain}`, 'Admin User', null, null],
@@ -109,6 +148,8 @@ async function up() {
       ['RECEPTIONIST', `reception@${domain}`, 'Reception User', null, null],
       ['NURSE_ASSISTANT', `nurse@${domain}`, 'Nurse User', null, 'GNM'],
       ['AUDITOR', `auditor@${domain}`, 'Auditor User', null, null],
+      ['PHARMACIST', `pharmacist@${domain}`, 'Pharmacist User', null, 'B.Pharm'],
+      ['RESEARCH_ANALYST', `analyst@${domain}`, 'Analyst User', null, null],
     ];
 
     for (const [role, email, name, registration, quals] of staff) {

@@ -92,6 +92,30 @@ export const Practitioner = z.object({
 });
 export type Practitioner = z.infer<typeof Practitioner>;
 
+/**
+ * Saving a clinic location.
+ *
+ * Deliberately small: a location is a name and where it is. Street address and
+ * phone belong to the clinic itself — putting them here too would give a clinic
+ * two addresses that can disagree, and nothing downstream would know which to
+ * print.
+ */
+export const SaveLocation = z.object({
+  id: Uuid.optional(),
+  name: z.string().trim().min(2, 'Name the location as staff refer to it'),
+  city: z.string().trim().nullish(),
+  state: z.string().trim().nullish(),
+  pincode: z
+    .string()
+    .trim()
+    .regex(/^[1-9][0-9]{5}$/, 'An Indian PIN code is six digits')
+    .nullish(),
+  /** Exactly one is primary; promoting one demotes the others server-side. */
+  isPrimary: z.boolean().default(false),
+  isActive: z.boolean().default(true),
+});
+export type SaveLocation = z.infer<typeof SaveLocation>;
+
 export const InviteStaff = z.object({
   fullName: z.string().trim().min(2, 'Enter a name'),
   email: z.string().email('Enter a valid email'),

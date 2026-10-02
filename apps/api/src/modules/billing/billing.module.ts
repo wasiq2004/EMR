@@ -2,12 +2,12 @@ import {
   Body, Controller, Get, Injectable, Module, NotFoundException, Param, Post, Query,
   ConflictException,
 } from '@nestjs/common';
-import { desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import * as schema from '@emr/db/schema';
 import { DraftInvoice, RecordPayment, computeInvoiceTotals, type Invoice } from '@emr/contracts';
 import { TenantDb } from '../../common/tenancy/tenant-db.service';
 import { TenantContext } from '../../common/tenancy/tenant-context';
-import { Audit, RequirePermission } from '../../common/http/decorators';
+import { Audit, RequirePermission, SkipAudit } from '../../common/http/decorators';
 import { RequiresFeature } from '../../common/features/feature.guard';
 import { parseBody, requireUuid } from '../../common/http/zod.pipe';
 
@@ -119,6 +119,7 @@ export class BillingService {
     referenceNumber?: string | null;
     isRefund?: boolean;
     refundReason?: string | null;
+    idempotencyKey?: string | null;
   }): Promise<Invoice> {
     const ctx = TenantContext.require();
 
@@ -133,19 +134,55 @@ export class BillingService {
         throw new ConflictException('That invoice has been cancelled.');
       }
 
-      await tx.insert(schema.payment).values({
-        clinicId: ctx.clinicId,
-        invoiceId,
-        patientId: invoice.patientId,
-        amountPaise: input.amountPaise,
-        method: input.method as 'CASH',
-        referenceNumber: input.referenceNumber ?? null,
-        receivedBy: ctx.userId,
-        isRefund: input.isRefund ?? false,
-        refundReason: input.refundReason ?? null,
-        createdBy: ctx.userId,
-        updatedBy: ctx.userId,
-      });
+      /*
+       * A retry returns the first payment instead of taking the money again.
+       *
+       * `ON CONFLICT DO NOTHING` on the idempotency index, then a check of what
+       * came back: an empty `returning()` means this key has already been paid,
+       * and the right answer is the invoice as it stands, not an error. A
+       * receptionist who taps twice should see one receipt and no complaint —
+       * telling them the second tap failed invites a third.
+       *
+       * This is one statement rather than a select-then-insert on purpose. Two
+       * statements lose the race to two concurrent requests, which is exactly
+       * the double-tap being guarded against.
+       */
+      const inserted = await tx
+        .insert(schema.payment)
+        .values({
+          clinicId: ctx.clinicId,
+          invoiceId,
+          patientId: invoice.patientId,
+          amountPaise: input.amountPaise,
+          method: input.method as 'CASH',
+          referenceNumber: input.referenceNumber ?? null,
+          receivedBy: ctx.userId,
+          isRefund: input.isRefund ?? false,
+          refundReason: input.refundReason ?? null,
+          idempotencyKey: input.idempotencyKey ?? null,
+          createdBy: ctx.userId,
+          updatedBy: ctx.userId,
+        })
+        .onConflictDoNothing({
+          // `where` on DO NOTHING is the INDEX predicate, not a filter on the
+          // insert — it has to match `payment_idempotency_uq` exactly or
+          // Postgres will not recognise the partial index as the arbiter.
+          target: [schema.payment.clinicId, schema.payment.idempotencyKey],
+          where: sql`idempotency_key IS NOT NULL`,
+        })
+        .returning({ id: schema.payment.id });
+
+      if (inserted.length === 0) {
+        const [patient] = await tx
+          .select({ name: schema.patient.fullName })
+          .from(schema.patient)
+          .where(eq(schema.patient.id, invoice.patientId))
+          .limit(1);
+        return {
+          ...serialise(invoice, patient?.name ?? 'Unknown'),
+          payments: await this.paymentsFor(invoiceId),
+        };
+      }
 
       const paid = Number(invoice.paidPaise) + input.amountPaise;
 
@@ -170,6 +207,62 @@ export class BillingService {
         payments: await this.paymentsFor(invoiceId),
       };
     });
+  }
+
+  /**
+   * What this consultation was billed, if anything.
+   *
+   * Looked up by encounter rather than by patient, because "has this VISIT been
+   * paid for" and "does this PERSON owe us anything" are different questions and
+   * answering the second when asked the first is how a returning patient's old
+   * debt gets collected at the wrong window.
+   *
+   * Returns a zeroed position rather than null when nothing was billed — the
+   * caller is asking a question about money, and `null` makes every consumer
+   * write the same defensive branch.
+   */
+  async positionForEncounter(encounterId: string) {
+    const [row] = await this.tenantDb.runReadOnly((tx) =>
+      tx
+        .select({
+          invoiceId: schema.invoice.id,
+          invoiceNumber: schema.invoice.invoiceNumber,
+          totalPaise: schema.invoice.totalPaise,
+          paidPaise: schema.invoice.paidPaise,
+          status: schema.invoice.status,
+        })
+        .from(schema.invoice)
+        .where(
+          and(
+            eq(schema.invoice.encounterId, encounterId),
+            // A cancelled invoice is not a debt, and not evidence of billing.
+            sql`${schema.invoice.status} <> 'CANCELLED'`,
+          ),
+        )
+        .orderBy(desc(schema.invoice.createdAt))
+        .limit(1),
+    );
+
+    if (!row) {
+      return {
+        invoiceId: null,
+        invoiceNumber: null,
+        totalPaise: 0,
+        paidPaise: 0,
+        outstandingPaise: 0,
+      };
+    }
+
+    const total = Number(row.totalPaise);
+    const paid = Number(row.paidPaise);
+    return {
+      invoiceId: row.invoiceId,
+      invoiceNumber: row.invoiceNumber,
+      totalPaise: total,
+      paidPaise: paid,
+      // Never negative: an overpayment is a credit to settle, not a debt.
+      outstandingPaise: Math.max(total - paid, 0),
+    };
   }
 
   private async paymentsFor(invoiceId: string) {
@@ -242,6 +335,20 @@ class BillingController {
     return this.billing.byId(requireUuid(id, 'Invoice'));
   }
 
+  /**
+   * The billing position of one consultation.
+   *
+   * Read by the consultation screen once it is signed, and by check-out. Exempt
+   * from the audit trail: it reads no clinical content and is polled by two
+   * screens that are open all day.
+   */
+  @RequirePermission('invoice:read')
+  @SkipAudit()
+  @Get('for-encounter/:encounterId')
+  forEncounter(@Param('encounterId') encounterId: string) {
+    return this.billing.positionForEncounter(requireUuid(encounterId, 'Consultation'));
+  }
+
   @RequirePermission('invoice:create')
   @Audit('INVOICE_CREATED', 'invoice')
   @Post()
@@ -253,8 +360,10 @@ class BillingController {
   @Audit('PAYMENT_RECORDED', 'payment')
   @Post(':id/payments')
   pay(@Param('id') id: string, @Body() body: unknown) {
+    // Not cast to `never`: the cast is what let `idempotencyKey` be parsed,
+    // validated and then silently dropped, because the method never accepted it.
     const input = parseBody(RecordPayment.omit({ invoiceId: true }), body);
-    return this.billing.recordPayment(requireUuid(id, 'Invoice'), input as never);
+    return this.billing.recordPayment(requireUuid(id, 'Invoice'), input);
   }
 }
 

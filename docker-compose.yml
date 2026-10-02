@@ -141,6 +141,11 @@ services:
       # stored token unreadable and every clinic has to reconnect, so it is
       # deliberately NOT derived from JWT_SECRET, which is rotated routinely.
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env}
+      # Authenticates the reminder scheduler, which is a cron line calling
+      # POST /jobs/run-due and therefore has no user session. Empty DISABLES
+      # that endpoint rather than leaving it open — a deployment with no
+      # scheduler is a legitimate configuration.
+      JOBS_SECRET: ${JOBS_SECRET:-}
       STORAGE_DRIVER: local
       STORAGE_LOCAL_PATH: /var/lib/emr/objects
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}

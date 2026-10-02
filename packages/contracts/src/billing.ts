@@ -29,6 +29,34 @@ export const ServiceItem = z.object({
 });
 export type ServiceItem = z.infer<typeof ServiceItem>;
 
+/**
+ * Saving a service.
+ *
+ * `defaultFeePaise` and `taxRateBps` are integers for the same reason they are
+ * everywhere else in this contract: a rounding difference on a consultation fee
+ * becomes a reconciliation argument at the end of the month.
+ */
+export const SaveServiceItem = z.object({
+  id: Uuid.optional(),
+  name: z.string().trim().min(2, 'Name the service as it should appear on an invoice'),
+  code: z.string().trim().nullish(),
+  description: z.string().trim().nullish(),
+  defaultFeePaise: Paise.min(0),
+  hsnSacCode: z.string().trim().nullish(),
+  /** Basis points. 18% is 1800. */
+  taxRateBps: z.number().int().min(0).max(10_000).default(0),
+  /**
+   * Lets a new consultation book a longer slot than a follow-up. Null means the
+   * clinic's default applies.
+   */
+  defaultDurationMinutes: z.number().int().positive().max(480).nullish(),
+  /** Set when only one doctor offers this. Null means anybody can. */
+  practitionerId: Uuid.nullish(),
+  isActive: z.boolean().default(true),
+  displayOrder: z.number().int().min(0).default(0),
+});
+export type SaveServiceItem = z.infer<typeof SaveServiceItem>;
+
 export const InvoiceLine = z.object({
   serviceItemId: Uuid.nullable().default(null),
   description: z.string().trim().min(1, 'Describe the charge'),
@@ -95,8 +123,14 @@ export const RecordPayment = z.object({
   referenceNumber: z.string().nullable().default(null),
   isRefund: z.boolean().default(false),
   refundReason: z.string().nullable().default(null),
-  /** A retried request must not take the payment twice. */
-  idempotencyKey: z.string(),
+  /**
+   * A retried request must not take the payment twice.
+   *
+   * Required, and non-empty: an empty string is not null, so the database's
+   * unique index would treat it as a real key and the FIRST empty-keyed payment
+   * in a clinic would block every one after it.
+   */
+  idempotencyKey: z.string().min(8, 'A payment needs a unique key'),
 });
 export type RecordPayment = z.infer<typeof RecordPayment>;
 

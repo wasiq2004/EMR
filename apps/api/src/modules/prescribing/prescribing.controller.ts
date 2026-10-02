@@ -1,5 +1,15 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
-import { PrescriptionLine } from '@emr/contracts';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
+import { PrescriptionLine, ReviseDosage } from '@emr/contracts';
 import { Audit, RequirePermission } from '../../common/http/decorators';
 import { parseBody, requireUuid } from '../../common/http/zod.pipe';
 import { PrescribingService } from './prescribing.service';
@@ -29,6 +39,20 @@ export class PrescribingController {
     return this.prescribing.addLine(
       requireUuid(id, 'Consultation'),
       parseBody(PrescriptionLine, body) as never,
+    );
+  }
+
+  /**
+   * Changes the dose on a line. The drug itself is not editable — see the
+   * service for why swapping the medicine has to be a remove-and-add.
+   */
+  @RequirePermission('prescription:update')
+  @Audit('PRESCRIPTION_DOSAGE_REVISED', 'prescription')
+  @Patch('prescriptions/:id')
+  reviseDosage(@Param('id') id: string, @Body() body: unknown) {
+    return this.prescribing.reviseDosage(
+      requireUuid(id, 'Prescription line'),
+      parseBody(ReviseDosage, body),
     );
   }
 

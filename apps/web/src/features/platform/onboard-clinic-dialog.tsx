@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { useOnboardClinic, usePlans } from './api';
-import { CredentialReveal } from './credential-reveal';
+import { CredentialReveal } from '@/components/ui/credential-reveal';
 import { ApiError } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
 import { Field, Input, Select } from '@/components/ui/field';

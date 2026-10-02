@@ -100,7 +100,17 @@ export const appointmentStatusEnum = pgEnum('appointment_status', [
   'CONFIRMED', // patient confirmed, typically via the WhatsApp reminder
   'ARRIVED', // physically checked in — this is what puts them in the live queue
   'IN_PROGRESS', // in consultation
-  'FULFILLED',
+  'FULFILLED', // the clinician has signed the consultation
+  /**
+   * The front desk has closed the visit.
+   *
+   * A SEPARATE STATE FROM FULFILLED, and the distinction is why it exists:
+   * FULFILLED means the doctor finished, CHECKED_OUT means the patient has
+   * settled up and left. Between the two sits the thing a clinic actually loses
+   * money on — a patient who walks past a busy front desk without paying. One
+   * state cannot express both without hiding that gap.
+   */
+  'CHECKED_OUT',
   'CANCELLED',
   'NOSHOW',
 ]);
@@ -464,6 +474,56 @@ export const consentScopeEnum = pgEnum('consent_scope', [
   'MARKETING_COMMUNICATION', // must be separately obtainable and withdrawable
   'DATA_SHARING_THIRD_PARTY',
   'ABDM_LINKAGE',
+]);
+
+/* --- Scheduled reminders ------------------------------------------------- */
+
+/**
+ * What a reminder is about.
+ *
+ * `APPOINTMENT` is here before anything creates one, so adding the day-before
+ * nudge later is new rows rather than an enum migration on a table with history
+ * in it.
+ */
+export const reminderKindEnum = pgEnum('reminder_kind', [
+  'FOLLOW_UP',
+  'APPOINTMENT',
+]);
+
+/**
+ * How a reminder goes out.
+ *
+ * `EMAIL` is modelled and not implemented: there is no mail provider in this
+ * deployment, and an email reminder records a clear failure rather than a
+ * pretend send. It is in the enum because the alternative — adding it when a
+ * provider appears — means a migration, and because a clinic choosing email
+ * should get an honest "not configured" instead of silence.
+ */
+export const reminderChannelEnum = pgEnum('reminder_channel', [
+  'WHATSAPP',
+  'EMAIL',
+]);
+
+/**
+ * Where a reminder has got to.
+ *
+ * `SENDING` exists because a claim has to be visible. A runner that dies
+ * mid-send leaves a row in `SENDING` with an old `claimed_at`, which is a
+ * different problem from a row that FAILED and must be distinguishable from it
+ * — otherwise the only safe recovery is to never retry anything.
+ *
+ * `SKIPPED` is not a failure. A reminder for a patient who never consented to
+ * WhatsApp, or who has already booked the follow-up, was correctly not sent, and
+ * filing that as FAILED would make a working system look broken and bury the
+ * real failures in the noise.
+ */
+export const reminderStatusEnum = pgEnum('reminder_status', [
+  'PENDING',
+  'SENDING',
+  'SENT',
+  'FAILED',
+  'SKIPPED',
+  'CANCELLED',
 ]);
 
 /** FHIR Invoice.status. */

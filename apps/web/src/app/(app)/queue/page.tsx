@@ -8,6 +8,7 @@ import {
   ArrowDown,
   ArrowUp,
   Check,
+  LogOut,
   Stethoscope,
   UserPlus,
   UserX,
@@ -21,6 +22,7 @@ import {
   useStartConsultation,
 } from '@/features/queue/api';
 import { AddWalkInDialog } from '@/features/queue/add-walk-in-dialog';
+import { CheckOutDialog } from '@/features/queue/check-out-dialog';
 import { useCan } from '@/lib/session';
 import { ageGender, formatMinutes, formatTime } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
@@ -55,9 +57,11 @@ export default function QueuePage() {
   const canAddWalkIn = useCan('appointment:create');
 
   const [walkInOpen, setWalkInOpen] = React.useState(false);
+  const [checkingOut, setCheckingOut] = React.useState<QueueEntry | null>(null);
 
   const waiting = data?.waiting ?? [];
   const completed = data?.completed ?? [];
+  const checkedOut = data?.checkedOut ?? [];
 
   const moveUp = (index: number) => {
     const entry = waiting[index];
@@ -91,7 +95,11 @@ export default function QueuePage() {
     <div className="mx-auto flex max-w-5xl flex-col gap-4">
       <PageHeader
         title="Today's queue"
-        description={`${waiting.length} waiting · ${completed.length} seen`}
+        description={
+          completed.length > 0
+            ? `${waiting.length} waiting · ${completed.length} to check out · ${checkedOut.length} settled`
+            : `${waiting.length} waiting · ${checkedOut.length} settled`
+        }
         actions={
           canAddWalkIn ? (
             <Button variant="primary" onClick={() => setWalkInOpen(true)}>
@@ -249,16 +257,57 @@ export default function QueuePage() {
         )}
       </Panel>
 
+      {/*
+        SEEN BUT NOT YET SETTLED. The actionable list, and the reason check-out is
+        a separate state: a patient the doctor has finished with is not a patient
+        who has left. Collapsing the two is how a consultation fee goes uncollected
+        — the row would vanish from the board the moment the doctor signs, and
+        nobody at the desk would ever see it again.
+      */}
       {completed.length > 0 ? (
-        <Panel>
-          <PanelHeader title="Seen today" description={`${completed.length} completed`} />
+        <Panel className="border-warning-line">
+          <PanelHeader
+            title="Ready to check out"
+            description={`${completed.length} seen, still at the desk`}
+          />
           <ul className="divide-y divide-line-soft">
             {completed.map((entry) => (
+              <li key={entry.appointment.id} className="flex flex-wrap items-center gap-3 px-4 py-2.5">
+                <Check className="size-3.5 shrink-0 text-positive" aria-hidden />
+                <Link
+                  href={`/patients/${entry.patient.id}`}
+                  className="min-w-0 flex-1 truncate text-sm font-medium text-ink hover:underline"
+                >
+                  {entry.patient.fullName}
+                </Link>
+                <span className="shrink-0 text-2xs text-ink-faint">
+                  seen {formatTime(entry.appointment.completedAt)}
+                </span>
+                {canManage ? (
+                  <Button size="sm" variant="primary" onClick={() => setCheckingOut(entry)}>
+                    <LogOut aria-hidden />
+                    Check out
+                  </Button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      ) : null}
+
+      {checkedOut.length > 0 ? (
+        <Panel>
+          <PanelHeader
+            title="Checked out"
+            description={`${checkedOut.length} settled and gone`}
+          />
+          <ul className="divide-y divide-line-soft">
+            {checkedOut.map((entry) => (
               <li
                 key={entry.appointment.id}
                 className="flex items-center gap-3 px-4 py-2 text-ink-faint"
               >
-                <Check className="size-3.5 shrink-0 text-positive" aria-hidden />
+                <LogOut className="size-3.5 shrink-0" aria-hidden />
                 <Link
                   href={`/patients/${entry.patient.id}`}
                   className="min-w-0 flex-1 truncate text-sm hover:underline"
@@ -266,7 +315,7 @@ export default function QueuePage() {
                   {entry.patient.fullName}
                 </Link>
                 <span className="shrink-0 text-2xs">
-                  {formatTime(entry.appointment.completedAt)}
+                  {formatTime(entry.appointment.checkedOutAt)}
                 </span>
               </li>
             ))}
@@ -275,6 +324,7 @@ export default function QueuePage() {
       ) : null}
 
       <AddWalkInDialog open={walkInOpen} onOpenChange={setWalkInOpen} />
+      <CheckOutDialog entry={checkingOut} onClose={() => setCheckingOut(null)} />
     </div>
   );
 }

@@ -16,6 +16,7 @@ export * from './clinical';
 export * from './comms';
 export * from './messaging';
 export * from './ops';
+export * from './scheduling';
 export * from './pharmacy';
 export * from './research';
 export * from './platform';
