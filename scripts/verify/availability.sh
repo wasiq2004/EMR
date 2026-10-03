@@ -95,12 +95,21 @@ at() { # name date clock present|absent body
 # A Wednesday far enough out that no fixture appointment lands on it, and inside
 # the 120-day cap the service enforces. Computed rather than hardcoded so this
 # suite does not expire.
+# ALL OF IT IN UTC, which is not fussiness. This used to advance a local Date
+# with getDay() and then take toISOString().slice(0, 10) — mixing a local
+# weekday with a UTC date. On a machine at UTC+5:30 that is right for most of
+# the day and wrong between midnight and 05:30, when a local Wednesday is still
+# Tuesday in UTC: the suite saved a weekday-3 session, asked for a Tuesday, and
+# got no slots. It passed every afternoon and failed overnight, which is worse
+# than failing outright.
 DAY=$(node -e '
-  const d = new Date(); d.setDate(d.getDate() + 30);
-  while (d.getDay() !== 3) d.setDate(d.getDate() + 1);
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + 30);
+  d.setUTCHours(0, 0, 0, 0);
+  while (d.getUTCDay() !== 3) d.setUTCDate(d.getUTCDate() + 1);
   console.log(d.toISOString().slice(0, 10));
 ')
-NEXT=$(node -e "const d=new Date('$DAY'); d.setDate(d.getDate()+1); console.log(d.toISOString().slice(0,10))")
+NEXT=$(node -e "const d=new Date('$DAY'+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()+1); console.log(d.toISOString().slice(0,10))")
 echo "-- deriving against $DAY (a Wednesday) --"
 
 echo "-- who may change a working week --"
@@ -311,7 +320,7 @@ echo "-- the month view derives no slots --"
 # Thirty cells of counts do not need six thousand slot objects. `freeSlots` must
 # come back NULL rather than 0: zero reads as "fully booked", and a month
 # claiming every day is full is worse than one claiming nothing.
-FOURWK=$(node -e "const d=new Date('$DAY');d.setDate(d.getDate()+28);console.log(d.toISOString().slice(0,10))")
+FOURWK=$(node -e "const d=new Date('$DAY'+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+28);console.log(d.toISOString().slice(0,10))")
 req GET "/calendar?from=$DAY&to=$FOURWK&includeSlots=false"
 check "a four-week range" 200 "$CODE" "$BODY"
 check "twenty-eight days" 28 "$(count date "$BODY")" "$BODY"

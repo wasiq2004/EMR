@@ -43,7 +43,9 @@ export type ServerEventType =
   | 'appointment-changed'
   | 'rx-queued'
   | 'rx-dispensed'
-  | 'rx-clarification';
+  | 'rx-clarification'
+  /** A lab order was placed, resulted, reviewed or cancelled. */
+  | 'lab-changed';
 
 export interface ServerEvent {
   type: ServerEventType;
@@ -65,6 +67,7 @@ const EVENT_TYPES: ServerEventType[] = [
   'rx-queued',
   'rx-dispensed',
   'rx-clarification',
+  'lab-changed',
 ];
 
 const BASE_DELAY_MS = 1_000;

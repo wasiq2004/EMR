@@ -28,6 +28,7 @@ import { PharmacyModule } from './modules/pharmacy/pharmacy.module';
 import { ResearchModule } from './modules/research/research.module';
 import { PortabilityModule } from './modules/portability/portability.module';
 import { HealthModule } from './modules/health/health.module';
+import { LabModule } from './modules/lab/lab.module';
 import { RemindersModule } from './modules/reminders/reminders.module';
 import { NavModule } from './modules/nav/nav.module';
 
@@ -68,6 +69,7 @@ import { NavModule } from './modules/nav/nav.module';
     ResearchModule,
     PortabilityModule,
     HealthModule,
+    LabModule,
     RemindersModule,
     NavModule,
   ],

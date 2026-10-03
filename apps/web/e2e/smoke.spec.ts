@@ -111,6 +111,22 @@ async function signIn(page: Page, role: keyof typeof SIGN_IN) {
   ).toBe(true);
 }
 
+/**
+ * The first given UTC weekday at least `days` from now, at UTC midnight.
+ *
+ * `weekday` is 0 = Sunday, matching `getUTCDay()` and the
+ * `practitioner_schedule` column. UTC throughout because these dates are
+ * compared against ISO dates the API returns, and mixing a local weekday with a
+ * UTC date is wrong for part of every day on any machine east of Greenwich.
+ */
+function utcWeekdayAfter(days: number, weekday: number): Date {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + days);
+  d.setUTCHours(0, 0, 0, 0);
+  while (d.getUTCDay() !== weekday) d.setUTCDate(d.getUTCDate() + 1);
+  return d;
+}
+
 /** Opens a route and fails on a console error or the Next error overlay. */
 async function visit(page: Page, path: string, problems: string[]) {
   await page.goto(path, { waitUntil: 'domcontentloaded' });
@@ -155,16 +171,30 @@ const CLINIC_ROUTES = [
   '/tasks',
 ];
 
+/*
+ * Routes that need clinical read access.
+ *
+ * NOT in `CLINIC_ROUTES`, which every clinic role walks. A lab result is a
+ * measured fact about somebody's body, and reception — who sees names and
+ * appointments but no clinical detail — holds no `labOrder:read`. Walking them
+ * through `/lab` made the page fire two 403s, which is the API behaving
+ * correctly and the test asking the wrong question. The navigation already does
+ * not offer it to them, so a receptionist would never arrive here.
+ */
+const CLINICAL_ROUTES = ['/lab'];
+
 const ADMIN_ROUTES = [
   '/patients/merge',
   '/billing',
   '/billing/invoices/new',
   '/reports',
+  '/reports/analytics',
   '/settings/clinic',
   '/settings/locations',
   '/settings/users',
   '/settings/services',
   '/settings/schedules',
+  '/settings/reminders',
   '/settings/encounter-templates',
   '/settings/prescription-templates',
   '/settings/whatsapp',
@@ -184,7 +214,7 @@ test('Front Desk opens every screen it can reach', async ({ page }) => {
 test('Doctor opens every screen it can reach', async ({ page }) => {
   const problems = watchConsole(page);
   await signIn(page, 'DOCTOR');
-  for (const path of [...CLINIC_ROUTES, '/billing', '/reports']) {
+  for (const path of [...CLINIC_ROUTES, ...CLINICAL_ROUTES, '/billing', '/reports']) {
     await visit(page, path, problems);
   }
 });
@@ -192,13 +222,15 @@ test('Doctor opens every screen it can reach', async ({ page }) => {
 test('Nurse opens every screen it can reach', async ({ page }) => {
   const problems = watchConsole(page);
   await signIn(page, 'NURSE_ASSISTANT');
-  for (const path of CLINIC_ROUTES) await visit(page, path, problems);
+  for (const path of [...CLINIC_ROUTES, ...CLINICAL_ROUTES]) {
+    await visit(page, path, problems);
+  }
 });
 
 test('Clinic Admin opens every screen including settings', async ({ page }) => {
   const problems = watchConsole(page);
   await signIn(page, 'OWNER_ADMIN');
-  for (const path of [...CLINIC_ROUTES, ...ADMIN_ROUTES]) {
+  for (const path of [...CLINIC_ROUTES, ...CLINICAL_ROUTES, ...ADMIN_ROUTES]) {
     await visit(page, path, problems);
   }
 });
@@ -271,14 +303,17 @@ test('the calendar draws a doctor’s day and books into it', async ({ page }) =
   ) as { id: string };
   expect(doctor, 'the fixture doctor is bookable').toBeTruthy();
 
-  // A Wednesday a month out: far enough that no fixture appointment lands on
-  // it, and inside the 120-day range the API allows.
-  const target = new Date();
-  target.setDate(target.getDate() + 30);
-  while (target.getDay() !== 3) target.setDate(target.getDate() + 1);
-  const date = `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}-${String(
-    target.getDate(),
-  ).padStart(2, '0')}`;
+  /*
+   * A Wednesday a month out: far enough that no fixture appointment lands on it,
+   * and inside the 120-day range the API allows.
+   *
+   * UTC throughout. Advancing a local date by weekday and then formatting it is
+   * right for most of the day and wrong between midnight and 05:30 on a
+   * UTC+5:30 machine, where a local Wednesday is still Tuesday in UTC — which
+   * made this suite pass every afternoon and fail overnight.
+   */
+  const target = utcWeekdayAfter(30, 3);
+  const date = target.toISOString().slice(0, 10);
   const saved = await page.request.post('/api/availability/schedules', {
     data: {
       practitionerId: doctor.id,
@@ -303,6 +338,7 @@ test('the calendar draws a doctor’s day and books into it', async ({ page }) =
     await expect(page.getByRole('heading', { name: 'Calendar' })).toBeVisible();
 
     const dayLabel = target.toLocaleDateString('en-GB', {
+      timeZone: 'UTC',
       weekday: 'short',
       day: 'numeric',
       month: 'short',
@@ -371,13 +407,10 @@ test('a booking at the front desk reaches the doctor’s calendar live', async (
     (row: { fullName: string }) => row.fullName === 'Dr Test Doctor',
   ) as { id: string };
 
-  // A Thursday this time, so this test cannot collide with the one above.
-  const target = new Date();
-  target.setDate(target.getDate() + 30);
-  while (target.getDay() !== 4) target.setDate(target.getDate() + 1);
-  const date = `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}-${String(
-    target.getDate(),
-  ).padStart(2, '0')}`;
+  // A Thursday this time, so this test cannot collide with the one above. UTC
+  // throughout, for the reason given on the calendar test.
+  const target = utcWeekdayAfter(30, 4);
+  const date = target.toISOString().slice(0, 10);
 
   const saved = await adminPage.request.post('/api/availability/schedules', {
     data: {

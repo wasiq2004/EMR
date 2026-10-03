@@ -224,10 +224,18 @@ before the doctor commits, not after.
 - **No mail provider.** Provisioning a clinic and inviting a staff member both
   return a one-time password to read out rather than pretending an email was
   sent.
-- **No reminder scheduling.** There was a settings screen for it that reported
-  "Reminder settings saved" and made no request at all; it has been removed
-  rather than left in place looking functional. The rules, the scheduler and
-  the quiet-hours window still need building.
+- **Reminders need a cron line, and the product does not run one.** Follow-up
+  reminders are scheduled when a consultation is signed and sent by
+  `POST /jobs/run-due`, which nothing calls on its own — see *The reminder
+  scheduler* below. There is deliberately no timer inside the API: the only
+  `setInterval` in it is the SSE heartbeat, and a process that quietly sends
+  messages on a schedule is a process whose behaviour is invisible when it goes
+  wrong. Without the cron line, reminders accumulate as `PENDING` and the log
+  shows them waiting.
+- **No approved reminder template ships.** WhatsApp permits business-initiated
+  messages only as templates Meta has approved, so a clinic needs one named
+  `follow_up_reminder` taking the patient's name and the date. Without it a
+  reminder fails and says exactly that, rather than failing silently.
 - **No inbound webhook.** Delivery receipts never arrive, so a message shows as
   sent and never advances to delivered or read.
 - **Teleconsultation is recorded, not conducted.** A consultation can be marked
@@ -296,6 +304,57 @@ Dark is a separate palette rather than an inversion, and `theme.test.ts` measure
 every foreground/background pair in both themes against WCAG 2.2 AA
 programmatically — a dark mode nobody has measured is how the one warning that
 matters ends up at 1.4:1.
+
+---
+
+## The reminder scheduler
+
+Follow-up reminders are scheduled inside the transaction that signs a
+consultation — so a signed consultation cannot exist without its reminder, and a
+signing that fails leaves none behind. Sending them is a separate step, and
+nothing in the product runs on a timer.
+
+Point a cron line at it:
+
+```cron
+# Every ten minutes. The endpoint is idempotent; see below.
+*/10 * * * * curl -fsS -X POST http://localhost:4000/v1/jobs/run-due \
+  -H "Authorization: Bearer $JOBS_SECRET" >/dev/null
+```
+
+Or, with systemd, a timer calling the same thing. On macOS for development,
+`docs/running-on-macos.md` has a `launchd` plist.
+
+**It is safe to call as often as you like, including concurrently.** Rows are
+claimed with `UPDATE ... WHERE status = 'PENDING' ... FOR UPDATE SKIP LOCKED`
+before anything is sent, so two overlapping runs take disjoint sets; the send
+then carries an idempotency key derived from the reminder's id, so even a claim
+that raced cannot produce two messages. `scripts/verify/reminders.sh` fires two
+runs at once against a due reminder and asserts one claim, one attempt and one
+message.
+
+**`JOBS_SECRET` authenticates it**, because a cron job has no user session and
+therefore no clinic — the whole point is that it works across every tenant.
+What that secret can do is narrow and worth stating: it authorises one endpoint,
+which takes no parameters, names no clinic or patient, and returns five
+integers. The work it triggers runs per clinic under ordinary row-level
+security. A leaked value lets somebody make a clinic's reminders go out early.
+It does not let them read anything.
+
+**An empty `JOBS_SECRET` disables the endpoint** rather than leaving it open. A
+deployment with no reminder scheduler is a legitimate configuration, and most
+clinics on this product have not connected WhatsApp at all.
+
+The response is counts, for the cron log:
+
+```json
+{ "claimed": 3, "sent": 2, "skipped": 1, "failed": 0, "recovered": 0 }
+```
+
+`skipped` is not a failure — a patient who never consented to WhatsApp, or who
+has already booked the follow-up, was correctly not messaged. `recovered` counts
+rows released from a previous run that died mid-send. A run that claims nothing
+reports zeros and exits 0.
 
 ---
 

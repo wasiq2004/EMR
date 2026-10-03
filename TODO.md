@@ -310,7 +310,11 @@ parameterised calls are built as `` `/x/${id}/y` ``.
 - [ ] `POST /share-links/:id/revoke` — a share link can be created, never revoked
 - [ ] `patients/merge` — dead primary action
 - [ ] `patients/[id]/consents`, `patients/[id]/documents` — dead buttons
-- [ ] `reports` — dead export button
+- [x] `reports` — dead export button. **Fixed in Stage G:** it was a `<Button>`
+      with no `onClick`, so it looked like an export and did nothing. The
+      dashboard is a fixed trailing window with nothing to export that a reader
+      cannot already see, so the control now leads to `/reports/analytics`, which
+      has the filters and six real CSV exports.
 - [ ] `settings/import` — two dead buttons, `GET /imports` uncalled, no import path
       at all (noted in the gap study)
 - [x] `settings/account` — two-factor HIDDEN, owner decision 2026-09-28. Four
@@ -618,30 +622,239 @@ stubbed; the scheduler is cron calling an idempotent `POST /jobs/run-due`.
       sharing one id.
 
 ## Stage E — Follow-up and reminders
-- [ ] E1. Follow-up picker on the consultation — optional; columns already exist
-- [ ] E2. `scheduled_reminder` — what, who, when, channel, status, attempts, sent-at
-- [ ] E3. `POST /jobs/run-due`, **idempotent**: claim with
-      `UPDATE ... WHERE status = 'PENDING'` before sending
-- [ ] E4. WhatsApp delivery, consent-gated; email records a clear failure
-- [ ] E5. Optional copy to the clinic's admin number, off by default, audited
-- [ ] E6. Reminder log: sent, to whom, delivered or not
-- [ ] E7. Document the cron line in the README and the macOS guide
-- [ ] **Checkpoint** — a follow-up set today for tomorrow fires once, not twice
+- [x] E1. The picker already existed and was **dead weight**: `followUpAfterDays`
+      was stored and printed on the prescription, and nothing on earth read it.
+      It now says what it will do — "a WhatsApp reminder will be scheduled for
+      12 Oct when you sign this, if the patient has consented" — or, when the
+      clinic has reminders off, says that instead of staying silent. A field with
+      a consequence has to state it, or a doctor assumes a reminder went out.
+- [x] E2. `scheduled_reminder`, plus migration `0012` with the grants (the
+      generated DDL grants nothing, so `emr_app` had no privilege on the table at
+      all) and assertions on the three things the design depends on: the partial
+      due-index, the one-live-reminder-per-encounter unique index, and
+      `communication_idempotency_uq`.
+- [x] E3. `POST /jobs/run-due`, idempotent in three layers because the failure
+      being guarded against is a patient getting the same message from their
+      doctor twice:
+      1. the claim — `UPDATE ... WHERE status = 'PENDING' ... FOR UPDATE SKIP
+         LOCKED`, so two overlapping runs take disjoint sets;
+      2. the `communication` idempotency key derived from the reminder's id, so
+         even a claim that raced cannot produce two messages;
+      3. the unique index, so the *scheduling* side cannot create two either.
+
+      Scheduled **inside the signing transaction**, like the pharmacy enqueue, so
+      a signed consultation cannot exist without its reminder and a failed
+      signing leaves none behind. Not on autosave: `followUpAfterDays` saves
+      every few seconds, and scheduling on change would create and cancel
+      reminders as the doctor edited the number.
+
+      Authenticated with `JOBS_SECRET` — a cron line has no user session and
+      therefore no clinic. The guard compares in constant time, and an **empty
+      secret disables the endpoint** rather than leaving it open. Clinics are
+      enumerated through `ClinicDirectoryService`, which returns ids only; behind
+      it is the platform connection, which holds grants on seven platform tables
+      and nothing clinical, so reading a patient through it is a permission error
+      rather than a leak. No fourth `SECURITY DEFINER` resolver was added.
+- [x] E4. WhatsApp delivery, **consent checked at send time** rather than at
+      scheduling — a patient who withdraws between the consultation and the
+      reminder must not receive it, and a withdrawal has to take effect without
+      anyone remembering to cancel things. Email is modelled and fails with "this
+      deployment has no mail provider" rather than pretending. A missing approved
+      template fails naming `follow_up_reminder`, because that is fixable in ten
+      minutes and a silent non-send is discovered when a patient does not return.
+      Also skipped — not failed — when the patient has already booked a future
+      appointment: reminding somebody to book what they have booked is what makes
+      a clinic turn reminders off.
+- [x] E5. The clinic copy, off by default, sent after the patient's and never
+      instead of it, and its failure never changes the reminder's outcome. The
+      toggle refuses to save without a valid E.164 number. Audited, because it
+      means a patient's name and follow-up date leave the record to a second
+      phone.
+- [x] E6. Reminder log on `/settings/reminders`, with the settings above it —
+      the only question anybody brings is "did it go out, and if not why", and
+      that is answered by the two together. `SKIPPED` is coloured neutral, not
+      red: a patient who never consented was *correctly* not messaged, and
+      painting that as a failure buries the real ones.
+- [x] E7. The cron line in the README (with what the secret can and cannot do)
+      and a `launchd` plist in the macOS guide. `JOBS_SECRET` documented in
+      `.env.example`, `docker-compose.yml` and the guide's secret appendix. The
+      README's "No reminder scheduling" gap is replaced by two honest ones: the
+      product runs no timer, and no approved template ships.
+- [x] **Checkpoint** — `scripts/verify/reminders.sh`, 48 assertions, all green.
+      The one it exists for fires two `run-due` calls **concurrently** against a
+      due reminder and asserts one claim, one attempt, one message and nothing
+      left mid-flight. Also: it does not fire early, a later run claims nothing,
+      a cancelled reminder is never sent, and a sent one cannot be cancelled.
+
+      Three defects it found:
+      1. **Claimed rows could be stranded in `SENDING`.** Two paths — an
+         unexpected throw, and the row-vanished branch — returned without writing
+         a terminal status, so the row was invisible until the 15-minute
+         stale-claim sweep. Found because two such rows were sitting in the
+         database from earlier debugging. Both paths now always write one.
+      2. **`emr_migrator` is a SUPERUSER**, so forced RLS does not constrain it —
+         superusers and `BYPASSRLS` roles bypass row-level security whether
+         `FORCE` is set or not. Four migrations (`0007` and three written in this
+         phase) claimed the opposite. All four corrected to state what `FORCE`
+         actually buys: it matters for `emr_app`, which is `NOBYPASSRLS`, and it
+         makes moving ownership to a non-superuser a one-line `ALTER` rather than
+         an audit. **Worth doing:** move table ownership off a superuser and the
+         documented property becomes true.
+      3. **A latent test bug that only bit overnight.** The date helpers advanced
+         a local `Date` by `getDay()` and then formatted with `toISOString()`, so
+         on a UTC+5:30 machine a local Wednesday was still Tuesday in UTC between
+         midnight and 05:30. The availability suite saved a weekday-3 session,
+         asked for a Tuesday, and got no slots — passing every afternoon and
+         failing overnight, which is worse than failing outright. All date
+         arithmetic in the suites and the browser tests is now UTC throughout.
 
 ## Stage G — Clinic Admin analytics
-- [ ] G1. Filters: date range, doctor, location, service, payment method
-- [ ] G2. Revenue: collected, outstanding, by method / doctor / service
-- [ ] G3. Patients: new vs returning, registrations over time
-- [ ] G4. Appointments: booked, completed, no-show %, cancellation %, utilisation
-      (needs Stage A)
-- [ ] G5. Invoice summary with outstanding ageing
-- [ ] G6. CSV export per view
+- [x] G1. Filters: date range, doctor, location, service, payment method.
+      **The service filter narrows revenue only, and the control says so.** An
+      appointment does not record a service — `BookAppointment` accepts a
+      `serviceItemId`, the booking path uses it to compute the end time and then
+      discards it, because there is no column to put it in. So "appointments for
+      a service" is a question this schema cannot answer. The filter is
+      deliberately not applied to the appointment counts rather than applied
+      wrongly, and the gap is listed below rather than hidden.
+- [x] G2. Revenue. **Collected, invoiced and outstanding are three different
+      numbers and all three are shown**, because reporting any one of them as
+      "revenue" is how a clinic budgets against money it has not received.
+      Outstanding is deliberately **not** range-filtered and says so on the
+      figure — a debt from March is still a debt in June, and scoping it to the
+      window would make it shrink as the window moved. Refunds get their own
+      figure and collections stay gross, so a clinic can see that a refund
+      happened at all.
+
+      Per-doctor revenue comes from the **payment rows**, not from
+      `invoice.paid_paise`. The dashboard's existing per-doctor figure sums
+      `paid_paise` over a join to encounter, so its column does not reconcile
+      with the collections total sitting above it on the same screen — two
+      numbers for the same money. Per-service comes from invoice lines (a JSONB
+      column, unnested) and measures what was **billed**, because a part-payment
+      against a three-line invoice cannot be split between the lines without
+      inventing a rule. The screen says which is which.
+- [x] G3. Patients: new, returning, and distinct seen. A patient registered
+      **and** seen in the range counts as new only — if both counted them, the
+      two would add to more than the number of people who came.
+- [x] G4. Appointments. **Both rates are over appointments that have CLOSED**,
+      and the denominator is printed next to each: over all appointments a
+      no-show rate counts tomorrow's bookings as attended. Null, not zero, when
+      nothing has closed yet.
+
+      Utilisation **reuses the Stage A slot derivation** rather than
+      re-deriving from the pattern — pattern minus exceptions minus leave is
+      subtle enough that a second implementation would eventually disagree with
+      the calendar, and a utilisation figure contradicting the grid it describes
+      is worse than none. Null when no schedule covers the range, with a link to
+      set hours, because 0% reads as "nobody came" rather than "we do not know".
+      Cancellations and no-shows contribute no booked minutes.
+- [x] G5. Outstanding by age, from `issued_at` rather than `created_at` — an
+      invoice drafted in March and issued in June has been owed since June, and
+      ageing a draft would show a debt nobody has been asked to pay. All four
+      buckets are always present: a table that omits "Over 60 days" when nothing
+      is that old looks the same as one where the column was forgotten.
+- [x] G6. CSV export per view, **built from the same `analytics()` result the
+      screen renders**, so an export cannot disagree with the figures somebody is
+      looking at. Quoted per RFC 4180 and asserted: a service called
+      "Consultation, follow-up" breaks a naive join and opens in Excel with its
+      columns shifted, which looks like bad data rather than a bad export.
+      Downloaded as a plain link so the browser handles the filename and the
+      progress, rather than fetched into a Blob.
+- [x] **Checkpoint** — `scripts/verify/analytics.sh`, 56 assertions, green on the
+      first run. Every figure is asserted against money and appointments the
+      suite creates: ₹1000 invoiced with ₹400 collected, a second invoice settled
+      by UPI, a ₹50 refund, and four appointments — one completed, one no-show,
+      one cancelled, one still scheduled — so the 33% rates and the
+      three-of-four-closed denominator are checked arithmetic rather than a
+      plausible-looking number. The range cap is refused before any query runs,
+      because utilisation derives slots across it.
+
+      Also fixed: **the Reports dashboard had an "Export CSV" button with no
+      handler** — it looked like an export and did nothing. It now leads to the
+      screen that actually exports.
+
+### Still open after Stage G
+- [ ] `appointment` has no `service_item_id`. The booking path accepts a service,
+      uses it for the duration and drops it, so appointment volume by service is
+      unanswerable and the analytics filter covers revenue only. One column plus
+      a migration, and the booking path already has the value in hand.
 
 ## Stage H — Lab  (separate; do not bundle)
-- [ ] H1. `lab_order`, `lab_result`, reference ranges, abnormal flagging
-- [ ] H2. Report attachment
-- [ ] H3. Doctor's "Results to review" card — a blueprint P0 that cannot exist
-      without H1
+- [x] H1. `lab_test_catalogue_item`, `lab_order`, `lab_result`, plus migration
+      `0013`. 62 seeded tests — what a 1–5 doctor Indian OPD writes on a slip,
+      not a pathology lab's price list.
+
+      **THE WHOLE MODULE IS ABOUT THE UNREAD RESULT.** A clinic that orders a
+      test and never looks at what came back is the failure this exists to
+      surface, so "a result arrived" (`RESULTED`) and "a clinician read it"
+      (`REVIEWED`) are two separate facts and nothing collapses them. Entering a
+      result never marks it reviewed; only a person does, and it is audited.
+
+      **Correcting a reviewed result UN-REVIEWS the order.** The doctor signed
+      off on a haemoglobin of 9.1; they have not seen the corrected 10.4, and
+      leaving the tick there would hide the new value behind one somebody put
+      there for the old one. The previous result is superseded and **kept** — it
+      may be why a patient was started on a drug — and a correction requires a
+      stated reason.
+
+      **ONE ROW PER TEST, not per requisition slip.** A CBC and a fasting glucose
+      come back at different times and are acted on separately; one order holding
+      both would read as "pending" until the slowest arrived, which is exactly
+      when the fast one matters.
+
+      **No "specimen collected" or "in transit" states.** The clinic does not run
+      the lab — the patient goes down the road and the report comes back on paper
+      or as a PDF — so nobody would ever update those, and modelling a state the
+      clinic cannot observe would leave every order stuck in it.
+
+      Interpretation is derived **server-side** from the reference range, never
+      accepted from the caller: the same rule as the vitals, and the suite proves
+      a caller claiming `CRITICAL` on a normal value is overruled. `CRITICAL` is
+      half a range-width beyond either bound — a multiple rather than a fixed
+      number, because a sodium 5 units high is unremarkable and a potassium 5
+      units high is an emergency. Qualitative results get `ABNORMAL` or nothing;
+      a narrative X-ray report is left **unflagged rather than guessed at**, and
+      still appears in the review list.
+
+      Ranges are **adult and not sex- or age-specific**, which is a real
+      limitation stated in the schema, the seed and the interface rather than
+      hidden. Haemoglobin alone differs by sex. The flag is a prompt to look.
+
+      Migration `0013` is the narrowest in the schema, because a result is a
+      measured fact about somebody's body: **no `DELETE` on `lab_result` for any
+      role** (a role that can delete can erase the evidence of what a doctor
+      acted on), and `emr_readonly` gets the orders but **not** the values —
+      "how many results are overdue" and "what was Mrs Rao's haemoglobin"
+      deserve different privileges.
+- [x] H2. Report attachment: `lab_result.document_id` into `document_reference`,
+      so a scanned report or a PDF from WhatsApp hangs off the result it belongs
+      to.
+- [x] H3. "Results to review" card, on the **doctor's and the nurse's**
+      dashboards and placed **above the next patient** — an unread abnormal
+      result should be seen before they call the next person in. It renders
+      nothing when nothing is waiting, rather than occupying the same space
+      saying zero, and goes red with words when something critical is unread.
+
+      Four numbers, and the split is the value: a result nobody opened is a
+      different problem from an order the patient never went for, and both differ
+      from a critical value sitting unread. `overdue` is worded as the two things
+      it might be, because the product cannot tell them apart and both need the
+      same phone call.
+- [x] **Checkpoint** — `scripts/verify/lab.sh`, 61 assertions, green on the first
+      run. Ordering with and without the catalogue, the `RESULTED`/`REVIEWED`
+      split, the server overruling a claimed interpretation, qualitative and
+      narrative results, correction-supersedes-and-un-reviews, one live result
+      enforced by the database, a resulted order refusing to be cancelled, and
+      the role split — nurse enters a result but cannot order a test; reception,
+      the pharmacist and the analyst get 403.
+
+      The browser suite caught one thing worth keeping: `/lab` had been added to
+      the route list **every** clinic role walks, so the receptionist walk fired
+      two 403s. That was the API behaving correctly and the test asking the wrong
+      question — reception holds no `labOrder:read` because a lab result is
+      clinical content. Moved to a `CLINICAL_ROUTES` list used by the doctor,
+      nurse and admin walks.
 
 ## Carried over from the dead-control audit
 - [ ] Browser suite covers none of pharmacy / analytics / platform — 22 screens

@@ -47,6 +47,22 @@ export const RESOURCES = [
   'invoice',
   'payment',
   'report',
+
+  /*
+   * One `labOrder` resource, not two.
+   *
+   * Unlike the pharmacy, the boundaries inside a lab workflow are not real for
+   * this product: the person who orders a test and the person who reads the
+   * result are the same doctor, and the receptionist who types in a report from
+   * a PDF is doing clerical work on an order somebody else owns. Splitting it
+   * into `labOrder` and `labResult` would create a permission nobody would ever
+   * grant differently.
+   *
+   * `update` is what enters a result and marks one reviewed. `create` is
+   * ordering. Reception holds update-without-create for exactly the typing case.
+   */
+  'labOrder',
+
   'auditEvent',
   'import',
   'export',
@@ -154,6 +170,7 @@ const OWNER_ADMIN: Permission[] = [
   ...p('user', 'read', 'create', 'update', 'delete'),
   ...p('patient', 'read', 'create', 'update', 'merge'),
   ...p('appointment', 'read', 'create', 'update', 'delete'),
+  ...p('labOrder', 'read', 'create', 'update', 'delete'),
   ...p('encounter', 'read'),
   // Full clinical READ. Every such access is additionally tagged
   // OWNER_CLINICAL_ACCESS in the audit trail, so a practice can demonstrate to
@@ -223,6 +240,12 @@ const DOCTOR: Permission[] = [
   ...p('internalNote', 'read', 'create', 'update', 'delete'),
   ...p('observation', 'read', 'create', 'update'),
   ...p('condition', 'read', 'create', 'update'),
+  /*
+   * A doctor orders, reads and reviews. `update` covers both entering a result
+   * and marking one reviewed — see the resource comment for why those are not
+   * separate permissions.
+   */
+  ...p('labOrder', 'read', 'create', 'update'),
   ...p('allergy', 'read', 'create', 'update'),
   ...p('prescription', 'read', 'create', 'update', 'sign'),
   ...p('document', 'read', 'create', 'share'),
@@ -285,6 +308,11 @@ const NURSE_ASSISTANT: Permission[] = [
   ...p('encounterClinicalContent', 'read'),
   ...p('observation', 'read', 'create', 'update'),
   ...p('condition', 'read'),
+  /*
+   * Read and update, but NOT create. A nurse types in a report that arrived on
+   * paper; deciding a test is needed is a clinical judgement they do not make.
+   */
+  ...p('labOrder', 'read', 'update'),
   // Allergy CREATE is granted deliberately — the nurse is usually the person
   // who asks the question at triage, and blocking it means the allergy is never
   // recorded at all.

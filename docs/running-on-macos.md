@@ -29,6 +29,7 @@ need [Daily use](#daily-use).
 - [7. Sign in](#7-sign-in)
 - [8. Turn on the optional modules](#8-turn-on-the-optional-modules)
 - [Daily use](#daily-use)
+- [Sending follow-up reminders](#sending-follow-up-reminders)
 - [Developing with hot reload](#developing-with-hot-reload)
 - [Running the tests](#running-the-tests)
 - [Ports and URLs](#ports-and-urls)
@@ -391,6 +392,68 @@ docker compose restart api
 docker compose exec api sh
 docker compose exec postgres psql -U emr_migrator -d emr
 ```
+
+### Sending follow-up reminders
+
+Reminders are scheduled when a consultation is signed, and sent by a separate
+endpoint that nothing calls on its own. For development, calling it by hand is
+usually enough:
+
+```bash
+# Reads JOBS_SECRET out of the .env the stack was started with.
+curl -fsS -X POST http://localhost:4000/v1/jobs/run-due \
+  -H "Authorization: Bearer $(grep '^JOBS_SECRET=' .env | cut -d= -f2-)"
+```
+
+It prints counts — `{"claimed":3,"sent":2,"skipped":1,"failed":0,"recovered":0}`
+— and is safe to run as often as you like, including twice at once. Rows are
+claimed before anything is sent, and the send carries an idempotency key, so a
+patient cannot receive the same reminder twice.
+
+If you want it running on a schedule on your Mac, `launchd` rather than `cron`
+is the native way. Save this as
+`~/Library/LaunchAgents/local.emr.reminders.plist`, with your own secret in
+place of the placeholder:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>local.emr.reminders</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/curl</string>
+    <string>-fsS</string>
+    <string>-X</string><string>POST</string>
+    <string>http://localhost:4000/v1/jobs/run-due</string>
+    <string>-H</string>
+    <string>Authorization: Bearer PUT_YOUR_JOBS_SECRET_HERE</string>
+  </array>
+  <key>StartInterval</key><integer>600</integer>
+  <key>RunAtLoad</key><false/>
+</dict>
+</plist>
+```
+
+Then:
+
+```bash
+launchctl load ~/Library/LaunchAgents/local.emr.reminders.plist
+launchctl list | grep local.emr.reminders      # confirm it is registered
+launchctl unload ~/Library/LaunchAgents/local.emr.reminders.plist   # to stop
+```
+
+`StartInterval` is seconds, so 600 is every ten minutes. `RunAtLoad` is false on
+purpose — loading the agent should not fire a send immediately, because the
+first thing you do after editing the plist is reload it.
+
+**Nothing is actually delivered unless a clinic has connected WhatsApp.** Without
+a credential the client simulates the send and logs at warn; the reminder and the
+message row still record their real lifecycle, which is what makes the behaviour
+testable locally. A clinic also needs an approved template named
+`follow_up_reminder`, and without one the reminder fails saying so.
 
 ### After you change code
 

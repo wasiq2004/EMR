@@ -27,6 +27,7 @@ import { CONSULTATION_MODE_LABEL } from '@emr/contracts';
 import { usePatient, usePatientSnapshot } from '@/features/patients/api';
 import { RecordVitalsDialog } from '@/features/patients/record-vitals-dialog';
 import { useReminderSettings } from '@/features/reminders/api';
+import { OrderTestPanel } from '@/features/lab/order-test-panel';
 import { VitalsGrid } from '@/features/patients/vitals-grid';
 import { AllergyBanner } from '@/features/patients/allergy-banner';
 import { DiagnosisCombobox } from '@/features/encounter/diagnosis-combobox';
@@ -196,6 +197,7 @@ export default function ConsultationPage() {
     })} when you sign this, if the patient has consented.`;
   })();
 
+  const canOrderLabs = useCan('labOrder:create');
   const allergies: Allergy[] = snapshot.data?.allergies ?? [];
   const finalised = encounter.data?.isFinalized ?? false;
   const readOnly = finalised || !canWriteClinical;
@@ -593,6 +595,22 @@ export default function ConsultationPage() {
             onAdd={(input) => addDiagnosis.mutate(input)}
             pending={addDiagnosis.isPending}
           />
+
+          {/*
+            Lab orders sit between the diagnosis and the prescription, which is
+            the order a consultation happens in: you decide what you think it is,
+            then what you want to confirm it, then what you are giving for it.
+            Rendered only where the role can order — reception never sees this
+            screen, and a nurse can enter a result but not decide a test is
+            needed.
+          */}
+          {canOrderLabs ? (
+            <OrderTestPanel
+              patientId={patientId}
+              encounterId={encounterId}
+              readOnly={readOnly}
+            />
+          ) : null}
 
           {canPrescribe ? (
             <Panel>

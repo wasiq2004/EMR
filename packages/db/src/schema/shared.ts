@@ -526,6 +526,43 @@ export const reminderStatusEnum = pgEnum('reminder_status', [
   'CANCELLED',
 ]);
 
+/* --- Lab ----------------------------------------------------------------- */
+
+/**
+ * A lab order's lifecycle, as a clinic that does not run the lab sees it.
+ *
+ * No "specimen collected" or "in transit": the patient goes to a lab down the
+ * road and nobody there updates this product. Modelling states the clinic cannot
+ * observe would leave every order stuck in one of them.
+ */
+export const labOrderStatusEnum = pgEnum('lab_order_status', [
+  'ORDERED',
+  /** A result is in. Distinct from REVIEWED — arriving is not being read. */
+  'RESULTED',
+  'REVIEWED',
+  'CANCELLED',
+]);
+
+/**
+ * Where a result falls against its reference range.
+ *
+ * `CRITICAL` is a separate band from `HIGH`/`LOW` for the same reason it is on
+ * the vitals: a potassium of 5.6 is high and common, and 7.2 is somebody who
+ * needs to be found today. Flagging both the same way makes the second read like
+ * the first.
+ *
+ * `ABNORMAL` is for qualitative results — "Positive", "Growth seen" — where
+ * there is no range and no direction, only the fact that it is not the expected
+ * answer.
+ */
+export const labInterpretationEnum = pgEnum('lab_interpretation', [
+  'NORMAL',
+  'LOW',
+  'HIGH',
+  'CRITICAL',
+  'ABNORMAL',
+]);
+
 /** FHIR Invoice.status. */
 export const invoiceStatusEnum = pgEnum('invoice_status', [
   'DRAFT',

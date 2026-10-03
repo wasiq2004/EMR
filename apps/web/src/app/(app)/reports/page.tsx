@@ -1,8 +1,9 @@
 'use client';
 
 import * as React from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { Download } from 'lucide-react';
+import { BarChart3 } from 'lucide-react';
 import type { ReportSummary } from '@emr/contracts';
 import { api } from '@/lib/api-client';
 import { qk } from '@/lib/query-client';
@@ -18,6 +19,7 @@ import { SkeletonRows } from '@/components/ui/feedback';
  * period. Anything that needs a finance team is out of scope.
  */
 export default function ReportsPage() {
+  const router = useRouter();
   const { data, isLoading } = useQuery({
     queryKey: qk.reports('14d', 'today'),
     queryFn: () => api.get<ReportSummary>('/reports/summary'),
@@ -33,9 +35,16 @@ export default function ReportsPage() {
         title="Reports"
         description="Last 14 days"
         actions={
-          <Button variant="secondary">
-            <Download aria-hidden />
-            Export CSV
+          /*
+           * This was a button with no handler — it looked like an export and did
+           * nothing. The dashboard is a fixed trailing window and has nothing to
+           * export that a reader cannot see; the filtered, groupable, exportable
+           * version is its own screen, so the control now goes there instead of
+           * pretending.
+           */
+          <Button variant="secondary" onClick={() => router.push('/reports/analytics')}>
+            <BarChart3 aria-hidden />
+            Analytics and exports
           </Button>
         }
       />

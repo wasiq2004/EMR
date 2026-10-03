@@ -54,6 +54,14 @@ export type EventType =
    * the two would make every calendar refetch on every check-in, all day.
    */
   | 'appointment-changed'
+  /*
+   * A lab order was placed, resulted, reviewed or cancelled.
+   *
+   * Identifiers only, like everything on this pipe — never the test name or the
+   * value. A lab result is among the most sensitive things in the record and
+   * this stream reaches every open tab in the clinic.
+   */
+  | 'lab-changed'
   | 'rx-queued'
   | 'rx-dispensed'
   | 'rx-clarification'

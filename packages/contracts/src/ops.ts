@@ -4,10 +4,11 @@
  */
 
 import { z } from 'zod';
-import { AuditFields, IsoDateTime, Paise, PhoneE164, Uuid } from './common';
+import { AuditFields, IsoDate, IsoDateTime, Paise, PhoneE164, Uuid } from './common';
 import {
   AuditOutcome,
   DocumentType,
+  PaymentMethod,
   TaskPriority,
   TaskStatus,
   UserRole,
@@ -421,3 +422,163 @@ export const ReportSummary = z.object({
   ),
 });
 export type ReportSummary = z.infer<typeof ReportSummary>;
+
+/* ------------------------------------------------------------------------- *
+ * Clinic analytics — the administrator's view of the practice
+ * ------------------------------------------------------------------------- */
+
+/**
+ * WHY THIS IS SEPARATE FROM `ReportSummary`.
+ *
+ * `ReportSummary` is the dashboard: a fixed trailing window, six numbers and a
+ * sparkline, and it answers "how is this week going". This answers "where did
+ * the money come from last quarter, and which doctor is full" — a filtered
+ * question with a date range, and the two have different shapes for a reason.
+ * Bolting filters onto the dashboard would make every screen pay for the
+ * grouping nobody on it asked for.
+ *
+ * It is also governed differently. The dashboard is aggregate-only so an AUDITOR
+ * may read it; this needs `report:read` as well and carries the same property —
+ * no figure below can be traced to one patient. Per-doctor and per-service
+ * breakdowns are about the clinic's own staff and price list, not about people.
+ */
+
+export const AnalyticsFilters = z.object({
+  /** Inclusive. */
+  from: IsoDate,
+  /** EXCLUSIVE, matching the calendar and the availability endpoints. */
+  to: IsoDate,
+  practitionerId: Uuid.nullish(),
+  locationId: Uuid.nullish(),
+  serviceItemId: Uuid.nullish(),
+  paymentMethod: PaymentMethod.nullish(),
+});
+export type AnalyticsFilters = z.infer<typeof AnalyticsFilters>;
+
+/** One row of a grouped total. */
+export const AnalyticsBreakdown = z.object({
+  /** Null where the dimension is genuinely absent — "no doctor assigned". */
+  id: Uuid.nullable(),
+  label: z.string(),
+  count: z.number().int(),
+  amountPaise: Paise,
+});
+export type AnalyticsBreakdown = z.infer<typeof AnalyticsBreakdown>;
+
+/**
+ * Money.
+ *
+ * COLLECTED AND INVOICED ARE DIFFERENT NUMBERS and both are given, because
+ * showing one and calling it "revenue" is how a clinic ends up budgeting against
+ * money it has not received. Collected is what arrived in the range; invoiced is
+ * what was billed in it; outstanding is what is owed *now* and is deliberately
+ * not range-filtered — a debt from March is still a debt in June, and scoping it
+ * to the range would make it shrink as the window moved.
+ */
+export const RevenueAnalytics = z.object({
+  collectedPaise: Paise,
+  invoicedPaise: Paise,
+  /** Owed as of now, across all time. Not filtered by the range — see above. */
+  outstandingPaise: Paise,
+  refundedPaise: Paise,
+  byMethod: z.array(AnalyticsBreakdown),
+  byPractitioner: z.array(AnalyticsBreakdown),
+  byService: z.array(AnalyticsBreakdown),
+  /** Collections per day, for the chart. */
+  series: z.array(z.object({ date: IsoDate, collectedPaise: Paise })),
+});
+export type RevenueAnalytics = z.infer<typeof RevenueAnalytics>;
+
+/**
+ * Patients.
+ *
+ * NEW IS BY REGISTRATION DATE, returning is "registered before the range and
+ * seen within it". A patient registered and seen in the same range counts as
+ * new, not both — otherwise the two add up to more than the number of people
+ * who came.
+ */
+export const PatientAnalytics = z.object({
+  newCount: z.number().int(),
+  returningCount: z.number().int(),
+  /** Everybody seen in the range, which is `newCount + returningCount`. */
+  seenCount: z.number().int(),
+  registrations: z.array(z.object({ date: IsoDate, count: z.number().int() })),
+});
+export type PatientAnalytics = z.infer<typeof PatientAnalytics>;
+
+/**
+ * Appointments.
+ *
+ * The percentages have explicit denominators, because the obvious ones are
+ * wrong. A no-show rate over *all* appointments counts tomorrow's bookings as
+ * attended; over *closed* ones it counts a cancellation as a kept appointment.
+ * So both rates are over appointments that reached a terminal state, and
+ * `closedCount` is reported so the reader can see what they are a share of.
+ */
+export const AppointmentAnalytics = z.object({
+  bookedCount: z.number().int(),
+  completedCount: z.number().int(),
+  noShowCount: z.number().int(),
+  cancelledCount: z.number().int(),
+  walkInCount: z.number().int(),
+  /** Completed + no-show + cancelled: the denominator for both rates below. */
+  closedCount: z.number().int(),
+  /** Null when nothing has closed yet — a rate over zero is not zero. */
+  noShowPct: z.number().int().nullable(),
+  cancellationPct: z.number().int().nullable(),
+  /**
+   * Booked minutes over offered minutes, from the practitioner schedules.
+   *
+   * Null when no schedules cover the range: a clinic that has not entered its
+   * working hours has no denominator, and reporting 0% would read as "nobody
+   * came" rather than "we do not know". Cancellations and no-shows are excluded
+   * from the numerator — a doctor is not busy during an appointment nobody
+   * attended.
+   */
+  utilisationPct: z.number().int().nullable(),
+  offeredMinutes: z.number().int().nullable(),
+  bookedMinutes: z.number().int(),
+});
+export type AppointmentAnalytics = z.infer<typeof AppointmentAnalytics>;
+
+/**
+ * Outstanding invoices by age.
+ *
+ * Aged from `issued_at`, not from the invoice date, because an invoice drafted in
+ * March and issued in June has been owed since June. Buckets are the ones a
+ * clinic chases on: this week, this month, and the two that need a phone call.
+ */
+export const InvoiceAgeing = z.object({
+  buckets: z.array(
+    z.object({
+      label: z.string(),
+      count: z.number().int(),
+      amountPaise: Paise,
+    }),
+  ),
+  totalPaise: Paise,
+  /** The oldest unpaid invoice's age in days, or null if nothing is owed. */
+  oldestDays: z.number().int().nullable(),
+});
+export type InvoiceAgeing = z.infer<typeof InvoiceAgeing>;
+
+export const ClinicAnalytics = z.object({
+  from: IsoDate,
+  to: IsoDate,
+  revenue: RevenueAnalytics,
+  patients: PatientAnalytics,
+  appointments: AppointmentAnalytics,
+  ageing: InvoiceAgeing,
+});
+export type ClinicAnalytics = z.infer<typeof ClinicAnalytics>;
+
+/** The views a CSV export can be taken of. */
+export const ANALYTICS_EXPORTS = [
+  { value: 'revenue-by-method', label: 'Revenue by payment method' },
+  { value: 'revenue-by-doctor', label: 'Revenue by doctor' },
+  { value: 'revenue-by-service', label: 'Revenue by service' },
+  { value: 'collections-daily', label: 'Collections per day' },
+  { value: 'registrations-daily', label: 'Registrations per day' },
+  { value: 'invoice-ageing', label: 'Outstanding invoices by age' },
+] as const;
+export type AnalyticsExport = (typeof ANALYTICS_EXPORTS)[number]['value'];

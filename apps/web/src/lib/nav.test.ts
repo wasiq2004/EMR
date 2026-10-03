@@ -381,3 +381,123 @@ describe('doctor schedules', () => {
     );
   });
 });
+
+/**
+ * The lab.
+ *
+ * A lab result is clinical content — a measured fact about somebody's body —
+ * so the boundary that matters is reception, who sees patient names and
+ * appointments but no clinical detail. `labOrder:read` draws that line, and the
+ * server enforces it: `scripts/verify/lab.sh` proves reception, the pharmacist
+ * and the research analyst all get 403.
+ */
+describe('the lab', () => {
+  const hrefsFor = (role: UserRole) => linksFor(role).map((item) => item.href);
+
+  it('is offered to the clinicians who read results', () => {
+    for (const role of ['OWNER_ADMIN', 'DOCTOR', 'NURSE_ASSISTANT'] as const) {
+      expect(hrefsFor(role), role).toContain('/lab');
+    }
+  });
+
+  it('is not offered to reception, the pharmacy or analytics', () => {
+    for (const role of ['RECEPTIONIST', 'PHARMACIST', 'RESEARCH_ANALYST', 'AUDITOR'] as const) {
+      expect(hrefsFor(role), role).not.toContain('/lab');
+    }
+  });
+
+  it('follows the permission rather than a hardcoded role list', () => {
+    for (const role of ROLES) {
+      expect(hrefsFor(role).includes('/lab'), role).toBe(can(role, 'labOrder:read'));
+    }
+  });
+
+  /*
+   * The split that matters inside the module: a nurse types in a report that
+   * arrived on paper, but deciding a test is needed is a clinical judgement they
+   * do not make. Reading and updating without creating is the whole point.
+   */
+  it('lets a nurse enter a result but not order a test', () => {
+    expect(can('NURSE_ASSISTANT', 'labOrder:update')).toBe(true);
+    expect(can('NURSE_ASSISTANT', 'labOrder:create')).toBe(false);
+  });
+
+  it('lets a doctor order, and nobody delete a result', () => {
+    expect(can('DOCTOR', 'labOrder:create')).toBe(true);
+    // Only the administrator may delete an order, and no role can delete a
+    // RESULT — that is a database grant, not a permission. See migration 0013.
+    expect(can('DOCTOR', 'labOrder:delete')).toBe(false);
+    expect(can('OWNER_ADMIN', 'labOrder:delete')).toBe(true);
+  });
+});
+
+/**
+ * Clinic analytics.
+ *
+ * `report:read`, the same permission as the dashboard, because both are
+ * aggregate-only by construction — no figure on either can be traced to one
+ * patient. That is a property of the queries, not of the screen choosing not to
+ * ask.
+ */
+describe('clinic analytics', () => {
+  const hrefsFor = (role: UserRole) => linksFor(role).map((item) => item.href);
+
+  /*
+   * Scoped to the roles in the CLINIC panel, not to every role holding the
+   * permission.
+   *
+   * The pharmacist holds `report:read` — for the counter's own sales figures —
+   * but gets the pharmacy panel, whose sections never include the clinic's
+   * navigation. So "holds the permission" and "is offered this link" are
+   * legitimately different, and asserting them equal across all seven roles
+   * fails on a role that is behaving correctly.
+   */
+  it('is offered to the clinic roles that can read reports', () => {
+    for (const role of ['OWNER_ADMIN', 'DOCTOR'] as const) {
+      expect(hrefsFor(role).includes('/reports/analytics'), role).toBe(
+        can(role, 'report:read'),
+      );
+    }
+  });
+
+  it('is not offered where the permission is absent', () => {
+    for (const role of ['RECEPTIONIST', 'NURSE_ASSISTANT'] as const) {
+      if (!can(role, 'report:read')) {
+        expect(hrefsFor(role), role).not.toContain('/reports/analytics');
+      }
+    }
+  });
+
+  it('is not in the pharmacy or analytics panels', () => {
+    for (const role of ['PHARMACIST', 'RESEARCH_ANALYST'] as const) {
+      expect(hrefsFor(role), role).not.toContain('/reports/analytics');
+    }
+  });
+
+  it('has not replaced the dashboard', () => {
+    expect(hrefsFor('OWNER_ADMIN')).toContain('/reports');
+  });
+});
+
+/**
+ * Follow-up reminders.
+ *
+ * `clinic:read` on the link so reception can see what the clinic sends and
+ * whether a reminder reached a patient; the page disables every control without
+ * `clinic:update`, which is what the API gates saving on.
+ */
+describe('reminder settings', () => {
+  it('is readable by anyone who can read the clinic', () => {
+    expect(settingsLinksFor('OWNER_ADMIN').map((l) => l.href)).toContain(
+      '/settings/reminders',
+    );
+    expect(settingsLinksFor('RECEPTIONIST').map((l) => l.href)).toContain(
+      '/settings/reminders',
+    );
+  });
+
+  it('but only an administrator may change it', () => {
+    expect(can('OWNER_ADMIN', 'clinic:update')).toBe(true);
+    expect(can('RECEPTIONIST', 'clinic:update')).toBe(false);
+  });
+});

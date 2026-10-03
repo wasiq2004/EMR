@@ -16,6 +16,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   boolean,
+  check,
   foreignKey,
   index,
   integer,
@@ -35,10 +36,12 @@ import {
   clinicIdColumn,
   conditionClinicalStatusEnum,
   conditionVerificationStatusEnum,
+  consultationModeEnum,
   documentStatusEnum,
   documentTypeEnum,
   encounterStatusEnum,
-  consultationModeEnum,
+  labInterpretationEnum,
+  labOrderStatusEnum,
   medicationRequestStatusEnum,
   observationStatusEnum,
   primaryKeyColumn,
@@ -837,5 +840,276 @@ export const prescriptionTemplate = pgTable(
       .on(t.clinicId, t.usageCount.desc())
       .where(sql`is_active = true`),
     tenantPolicy('prescription_template'),
+  ],
+).enableRLS();
+
+/* ------------------------------------------------------------------------- *
+ * Lab — orders placed, and results that come back
+ * ------------------------------------------------------------------------- */
+
+/**
+ * A lab test the clinic can order.
+ *
+ * SHARED REFERENCE DATA, like the drug and diagnosis catalogues: rows under
+ * `SYSTEM_CLINIC_ID` are visible to every clinic and writable by none, and a
+ * clinic adds its own beside them. Most Indian outpatient clinics do not run
+ * their own lab — they send the patient to one down the road and the report
+ * comes back on paper or as a PDF on WhatsApp — so this list is what gets
+ * ordered, not what the clinic can perform.
+ *
+ * The reference range lives HERE rather than on the result, so a result can be
+ * flagged against the range that applied when it was recorded, and a clinic
+ * correcting a typo in a range does not retroactively reclassify every past
+ * result. The result keeps its own copy — see `labResult.referenceLow`.
+ */
+export const labTestCatalogueItem = pgTable(
+  'lab_test_catalogue_item',
+  {
+    id: primaryKeyColumn(),
+    clinicId: clinicIdColumn(),
+
+    /** LOINC where we have it. Nullable: plenty of Indian panels have no LOINC. */
+    code: text('code'),
+    codeSystem: text('code_system'),
+
+    /** What the doctor sees and what is printed on the order. */
+    name: text('name').notNull(),
+    /** Lowercased name plus synonyms, for the typeahead. */
+    searchNormalized: text('search_normalized').notNull(),
+
+    /** "Haematology", "Biochemistry", "Radiology" — groups the picker. */
+    category: text('category'),
+
+    /**
+     * The unit the result is reported in, fixed per test.
+     *
+     * Same reasoning as the vitals: a haemoglobin entered in the wrong unit is
+     * not a validation message, it is a clinical decision made on a number that
+     * is off by a factor of ten.
+     */
+    unit: text('unit'),
+
+    /**
+     * Adult reference range. Null where the test is qualitative.
+     *
+     * NOT SEX- OR AGE-SPECIFIC, and that is a real limitation rather than an
+     * oversight: haemoglobin alone differs by sex, and paediatric ranges differ
+     * by year. A single range flags a result as worth looking at; it does not
+     * diagnose, and the interface says so. Storing one range and pretending it
+     * is universal would be worse than storing none.
+     */
+    referenceLow: numeric('reference_low', { precision: 12, scale: 4 }),
+    referenceHigh: numeric('reference_high', { precision: 12, scale: 4 }),
+
+    /** What the clinic charges, if it bills for arranging the test. */
+    pricePaise: bigint('price_paise', { mode: 'number' }),
+
+    catalogueVersion: text('catalogue_version').notNull(),
+    isActive: boolean('is_active').notNull().default(true),
+
+    ...auditColumns(),
+  },
+  (t) => [
+    foreignKey({ columns: [t.clinicId], foreignColumns: [clinic.id] }).onDelete('restrict'),
+    index('lab_test_catalogue_search_trgm_idx').using(
+      'gin',
+      t.clinicId.op('uuid_ops'),
+      t.searchNormalized.op('gin_trgm_ops'),
+    ),
+    uniqueIndex('lab_test_catalogue_uq').on(t.clinicId, t.name),
+    ...sharedReferencePolicy('lab_test_catalogue_item'),
+  ],
+).enableRLS();
+
+/**
+ * A test the doctor asked for.
+ *
+ * ONE ROW PER TEST, not per requisition slip. A doctor ordering a CBC and a
+ * fasting glucose has asked two questions that come back at different times and
+ * are acted on separately — modelling them as one order with a list inside means
+ * the whole thing is "pending" until the slowest result arrives, which is
+ * exactly when a doctor needs to see the fast one.
+ *
+ * `status` carries the only lifecycle that matters to a clinic: asked for,
+ * result in, looked at. There is no "specimen collected" or "in transit",
+ * because the clinic does not run the lab and would have nobody to update them.
+ */
+export const labOrder = pgTable(
+  'lab_order',
+  {
+    id: primaryKeyColumn(),
+    clinicId: clinicIdColumn(),
+    patientId: uuid('patient_id').notNull(),
+
+    /** The consultation it was ordered from. Null for a standing order. */
+    encounterId: uuid('encounter_id'),
+
+    /** Null for a free-text test the catalogue does not have. */
+    catalogueItemId: uuid('catalogue_item_id'),
+
+    /**
+     * Denormalised at order time, deliberately.
+     *
+     * The order is a record of what was asked for, and it has to still say that
+     * after the catalogue entry is renamed or deactivated. The same reason
+     * `medication_request` keeps its own `molecule_name`.
+     */
+    testName: text('test_name').notNull(),
+    unit: text('unit'),
+
+    status: labOrderStatusEnum('status').notNull().default('ORDERED'),
+
+    /**
+     * Why it was ordered, in the doctor's words.
+     *
+     * Free text rather than a link to a `condition`, because the reason is
+     * frequently a suspicion rather than a diagnosis — "rule out anaemia" is not
+     * a condition anybody would record on the patient.
+     */
+    clinicalNote: text('clinical_note'),
+
+    /** Routine or urgent. Urgent sorts to the top of the review list. */
+    isUrgent: boolean('is_urgent').notNull().default(false),
+
+    orderedAt: timestamp('ordered_at', { withTimezone: true }).notNull().defaultNow(),
+    orderedBy: uuid('ordered_by').notNull(),
+
+    /**
+     * When a clinician actually looked at the result.
+     *
+     * The point of the whole module. An abnormal result that nobody opened is
+     * the failure mode this exists to make visible — see the review list — and
+     * "acknowledged" has to be a separate fact from "a result exists", or the
+     * arrival of the result would silently count as somebody having read it.
+     */
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    reviewedBy: uuid('reviewed_by'),
+
+    cancelledReason: text('cancelled_reason'),
+
+    ...auditColumns(),
+  },
+  (t) => [
+    foreignKey({ columns: [t.clinicId], foreignColumns: [clinic.id] }).onDelete('restrict'),
+    foreignKey({ columns: [t.patientId], foreignColumns: [patient.id] }).onDelete('restrict'),
+    foreignKey({ columns: [t.orderedBy], foreignColumns: [appUser.id] }).onDelete('restrict'),
+
+    index('lab_order_clinic_patient_idx').on(t.clinicId, t.patientId, t.orderedAt.desc()),
+    /*
+     * The review list, which is the one hot read.
+     *
+     * Partial on the two statuses that need a clinician's attention, because a
+     * clinic three years in has tens of thousands of reviewed orders and a
+     * handful outstanding.
+     */
+    index('lab_order_awaiting_idx')
+      .on(t.clinicId, t.isUrgent.desc(), t.orderedAt)
+      .where(sql`status IN ('ORDERED', 'RESULTED') AND reviewed_at IS NULL`),
+    tenantPolicy('lab_order'),
+  ],
+).enableRLS();
+
+/**
+ * What came back.
+ *
+ * SEPARATE FROM THE ORDER because a result can be amended. A lab that phones to
+ * correct a potassium does not change what was ordered, and overwriting the
+ * value in place would destroy the record of what the doctor acted on. So a
+ * correction is a new row and the previous one is marked superseded — the same
+ * append-only instinct as the rest of the clinical record.
+ *
+ * It is NOT an `observation`. Vitals are measured by the clinic on a patient in
+ * front of them, against ranges the product ships; a lab result arrives from a
+ * third party with its own range, its own specimen date and its own
+ * amendability. Forcing them into one table would mean every vitals query
+ * filters out lab rows and every lab query filters out vitals.
+ */
+export const labResult = pgTable(
+  'lab_result',
+  {
+    id: primaryKeyColumn(),
+    clinicId: clinicIdColumn(),
+    labOrderId: uuid('lab_order_id').notNull(),
+
+    /**
+     * The numeric value, where there is one.
+     *
+     * Nullable because plenty of results are not numbers: "Positive", "No growth
+     * after 48 hours", "Normal study". Those go in `valueText`, and a result with
+     * neither is not a result.
+     */
+    valueNumeric: numeric('value_numeric', { precision: 14, scale: 4 }),
+    valueText: text('value_text'),
+    unit: text('unit'),
+
+    /**
+     * The range THIS result was judged against, copied at entry.
+     *
+     * Not read from the catalogue at display time: a clinic correcting a typo in
+     * a reference range must not retroactively reclassify every result ever
+     * recorded against it. The flag below is computed from these.
+     */
+    referenceLow: numeric('reference_low', { precision: 12, scale: 4 }),
+    referenceHigh: numeric('reference_high', { precision: 12, scale: 4 }),
+
+    /**
+     * Where the value falls. Derived server-side from the range, never accepted
+     * from the caller — the same rule as the vitals, and for the same reason:
+     * "is this dangerous" is a clinical assertion, not a field a client fills in.
+     */
+    interpretation: labInterpretationEnum('interpretation'),
+
+    /** When the specimen was taken, which is not when the result was entered. */
+    specimenAt: timestamp('specimen_at', { withTimezone: true }),
+    resultedAt: timestamp('resulted_at', { withTimezone: true }).notNull().defaultNow(),
+
+    /** Which lab produced it. Free text: most clinics use several. */
+    performedBy: text('performed_by'),
+
+    /** The lab's own comment, where it sent one. */
+    labNote: text('lab_note'),
+
+    /** The scanned report or PDF, where one was attached. */
+    documentId: uuid('document_id'),
+
+    /**
+     * Set when a later result corrects this one.
+     *
+     * The row is kept, because the doctor may have acted on it, and a record
+     * that silently replaces a value cannot explain a decision made on the old
+     * one.
+     */
+    supersededAt: timestamp('superseded_at', { withTimezone: true }),
+    supersededReason: text('superseded_reason'),
+
+    enteredBy: uuid('entered_by').notNull(),
+
+    ...auditColumns(),
+  },
+  (t) => [
+    foreignKey({ columns: [t.clinicId], foreignColumns: [clinic.id] }).onDelete('restrict'),
+    foreignKey({ columns: [t.labOrderId], foreignColumns: [labOrder.id] }).onDelete('cascade'),
+    foreignKey({ columns: [t.documentId], foreignColumns: [documentReference.id] }).onDelete(
+      'set null',
+    ),
+    foreignKey({ columns: [t.enteredBy], foreignColumns: [appUser.id] }).onDelete('restrict'),
+
+    index('lab_result_clinic_order_idx').on(t.clinicId, t.labOrderId, t.resultedAt.desc()),
+    /*
+     * One LIVE result per order.
+     *
+     * A correction supersedes the previous row rather than sitting beside it, so
+     * "the result" is always unambiguous. Without this, two entries from two
+     * people on the same morning would leave nobody able to say which was
+     * current.
+     */
+    uniqueIndex('lab_result_live_uq')
+      .on(t.labOrderId)
+      .where(sql`superseded_at IS NULL`),
+    check(
+      'lab_result_has_a_value',
+      sql`value_numeric IS NOT NULL OR coalesce(trim(value_text), '') <> ''`,
+    ),
+    tenantPolicy('lab_result'),
   ],
 ).enableRLS();

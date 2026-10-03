@@ -39,6 +39,7 @@ async function main() {
   try {
     await seedDrugCatalogue(db);
     await seedDiagnosisCatalogue(db);
+    await seedLabTestCatalogue(db);
     console.log('Reference data ready.');
   } finally {
     await pool.end();
@@ -80,6 +81,130 @@ type Database = ReturnType<typeof drizzle<typeof schema>>;
  * a wrong ICD-10 code travels onto an insurance claim and into the next
  * clinician's reading, so we seed only codes we are confident of.
  */
+/**
+ * The lab tests an Indian outpatient clinic orders.
+ *
+ * Shared reference data under the system tenant, like the drugs and the
+ * diagnoses. Short on purpose: these are the tests a 1-5 doctor OPD actually
+ * writes on a slip, not a pathology lab's price list. A clinic adds its own.
+ *
+ * REFERENCE RANGES ARE ADULT AND NOT SEX-SPECIFIC, which is a real limitation
+ * stated rather than hidden. Haemoglobin alone differs by sex; paediatric ranges
+ * differ by year. One range flags a value as worth a second look — it does not
+ * diagnose, and the interface says so. Storing one range and presenting it as
+ * universal truth would be worse than storing none, which is why the flag is
+ * worded as a prompt everywhere it appears.
+ *
+ * Where a range is genuinely not meaningful the columns are null and the result
+ * is recorded as text: a urine culture reports "no growth", not a number.
+ */
+async function seedLabTestCatalogue(db: Database) {
+  const existing = await db.execute<{ count: string }>(sql`
+    SELECT count(*) AS count
+    FROM lab_test_catalogue_item
+    WHERE clinic_id = ${SYSTEM_CLINIC_ID}::uuid
+  `);
+  if (Number(existing.rows[0]?.count ?? 0) > 0) {
+    console.log('  lab test catalogue already present');
+    return;
+  }
+
+  // [name, category, unit, low, high, synonyms]
+  const tests: [string, string, string | null, number | null, number | null, string?][] = [
+    /* --- Haematology --- */
+    ['Haemoglobin', 'Haematology', 'g/dL', 12, 16, 'hb hgb haemoglobin hemoglobin'],
+    ['Complete blood count', 'Haematology', null, null, null, 'cbc hemogram full blood count'],
+    ['Total leucocyte count', 'Haematology', 'cells/uL', 4000, 11000, 'tlc wbc white cell'],
+    ['Platelet count', 'Haematology', 'cells/uL', 150000, 450000, 'platelets plt'],
+    ['ESR', 'Haematology', 'mm/hr', 0, 20, 'esr sedimentation rate'],
+    ['Peripheral smear', 'Haematology', null, null, null, 'ps smear malaria parasite'],
+
+    /* --- Biochemistry --- */
+    ['Fasting blood sugar', 'Biochemistry', 'mg/dL', 70, 100, 'fbs fasting glucose sugar'],
+    ['Postprandial blood sugar', 'Biochemistry', 'mg/dL', 70, 140, 'ppbs post prandial sugar'],
+    ['Random blood sugar', 'Biochemistry', 'mg/dL', 70, 140, 'rbs random sugar'],
+    ['HbA1c', 'Biochemistry', '%', 4, 5.7, 'hba1c glycated haemoglobin a1c'],
+    ['Serum creatinine', 'Biochemistry', 'mg/dL', 0.6, 1.3, 'creatinine renal kidney'],
+    ['Blood urea', 'Biochemistry', 'mg/dL', 15, 40, 'urea bun'],
+    ['Serum sodium', 'Biochemistry', 'mEq/L', 135, 145, 'sodium na electrolytes'],
+    ['Serum potassium', 'Biochemistry', 'mEq/L', 3.5, 5.1, 'potassium k electrolytes'],
+    ['Serum calcium', 'Biochemistry', 'mg/dL', 8.5, 10.5, 'calcium ca'],
+    ['Uric acid', 'Biochemistry', 'mg/dL', 3.5, 7.2, 'uric acid gout'],
+    ['Total bilirubin', 'Biochemistry', 'mg/dL', 0.2, 1.2, 'bilirubin jaundice lft'],
+    ['SGPT (ALT)', 'Biochemistry', 'U/L', 7, 56, 'sgpt alt liver lft'],
+    ['SGOT (AST)', 'Biochemistry', 'U/L', 10, 40, 'sgot ast liver lft'],
+    ['Alkaline phosphatase', 'Biochemistry', 'U/L', 44, 147, 'alp alkaline phosphatase'],
+    ['Serum albumin', 'Biochemistry', 'g/dL', 3.5, 5.5, 'albumin'],
+    ['Total cholesterol', 'Biochemistry', 'mg/dL', 0, 200, 'cholesterol lipid profile'],
+    ['LDL cholesterol', 'Biochemistry', 'mg/dL', 0, 100, 'ldl bad cholesterol'],
+    ['HDL cholesterol', 'Biochemistry', 'mg/dL', 40, 60, 'hdl good cholesterol'],
+    ['Triglycerides', 'Biochemistry', 'mg/dL', 0, 150, 'triglycerides tg lipid'],
+    ['Lipid profile', 'Biochemistry', null, null, null, 'lipid profile cholesterol panel'],
+    ['Vitamin B12', 'Biochemistry', 'pg/mL', 200, 900, 'b12 cobalamin'],
+    ['Vitamin D (25-OH)', 'Biochemistry', 'ng/mL', 30, 100, 'vitamin d 25 hydroxy vit d'],
+    ['Serum ferritin', 'Biochemistry', 'ng/mL', 30, 300, 'ferritin iron stores'],
+    ['Serum iron', 'Biochemistry', 'ug/dL', 60, 170, 'iron fe'],
+    ['CRP', 'Biochemistry', 'mg/L', 0, 5, 'crp c reactive protein inflammation'],
+
+    /* --- Endocrine --- */
+    ['TSH', 'Endocrine', 'uIU/mL', 0.4, 4.0, 'tsh thyroid stimulating hormone'],
+    ['Free T4', 'Endocrine', 'ng/dL', 0.8, 1.8, 'ft4 free t4 thyroxine'],
+    ['Free T3', 'Endocrine', 'pg/mL', 2.3, 4.2, 'ft3 free t3'],
+    ['Thyroid profile', 'Endocrine', null, null, null, 'thyroid profile t3 t4 tsh'],
+
+    /* --- Microbiology and serology --- */
+    ['Urine routine', 'Microbiology', null, null, null, 'urine re me routine microscopy'],
+    ['Urine culture', 'Microbiology', null, null, null, 'urine culture sensitivity uti'],
+    ['Blood culture', 'Microbiology', null, null, null, 'blood culture sepsis'],
+    ['Stool routine', 'Microbiology', null, null, null, 'stool re me ova cyst'],
+    ['Dengue NS1 antigen', 'Serology', null, null, null, 'dengue ns1'],
+    ['Dengue IgM', 'Serology', null, null, null, 'dengue igm'],
+    ['Malaria antigen', 'Serology', null, null, null, 'malaria rapid mp antigen'],
+    ['Widal test', 'Serology', null, null, null, 'widal typhoid'],
+    ['Typhoid IgM', 'Serology', null, null, null, 'typhidot typhoid igm'],
+    ['HBsAg', 'Serology', null, null, null, 'hbsag hepatitis b surface antigen'],
+    ['Anti-HCV', 'Serology', null, null, null, 'hcv hepatitis c antibody'],
+    ['HIV I and II', 'Serology', null, null, null, 'hiv elisa retroviral'],
+    ['VDRL', 'Serology', null, null, null, 'vdrl syphilis rpr'],
+    ['Mantoux test', 'Microbiology', 'mm', 0, 9, 'mantoux tuberculin tst'],
+    ['Sputum AFB', 'Microbiology', null, null, null, 'afb sputum tb acid fast'],
+    ['CBNAAT for TB', 'Microbiology', null, null, null, 'cbnaat genexpert tb'],
+    ['COVID-19 RT-PCR', 'Microbiology', null, null, null, 'covid rtpcr sars cov 2'],
+
+    /* --- Obstetric --- */
+    ['Urine pregnancy test', 'Obstetric', null, null, null, 'upt pregnancy test'],
+    ['Beta hCG', 'Obstetric', 'mIU/mL', null, null, 'bhcg beta hcg pregnancy'],
+    ['Blood group and Rh', 'Haematology', null, null, null, 'blood group typing rh abo'],
+
+    /* --- Cardiac --- */
+    ['Troponin I', 'Cardiac', 'ng/mL', 0, 0.04, 'troponin cardiac marker'],
+    ['ECG', 'Cardiology', null, null, null, 'ecg ekg electrocardiogram'],
+
+    /* --- Imaging, which clinics order on the same slip --- */
+    ['Chest X-ray', 'Radiology', null, null, null, 'cxr chest xray'],
+    ['Ultrasound abdomen', 'Radiology', null, null, null, 'usg abdomen ultrasound'],
+    ['Ultrasound pelvis', 'Radiology', null, null, null, 'usg pelvis'],
+    ['X-ray knee', 'Radiology', null, null, null, 'xray knee'],
+    ['X-ray lumbosacral spine', 'Radiology', null, null, null, 'xray ls spine lumbar'],
+  ];
+
+  for (const [name, category, unit, low, high, synonyms] of tests) {
+    await db.execute(sql`
+      INSERT INTO lab_test_catalogue_item
+        (clinic_id, name, search_normalized, category, unit,
+         reference_low, reference_high, catalogue_version)
+      VALUES (
+        ${SYSTEM_CLINIC_ID}::uuid, ${name},
+        ${`${name} ${synonyms ?? ''}`.toLowerCase().replace(/\s+/g, ' ').trim()},
+        ${category}, ${unit}, ${low}, ${high}, 'lab-opd-in-v1'
+      )
+      ON CONFLICT (clinic_id, name) DO NOTHING
+    `);
+  }
+
+  console.log(`  seeded ${tests.length} lab tests under the system tenant`);
+}
+
 async function seedDiagnosisCatalogue(db: Database) {
   const existing = await db.execute<{ count: string }>(sql`
     SELECT count(*) AS count

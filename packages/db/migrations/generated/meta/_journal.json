@@ -71,6 +71,13 @@
       "when": 1790966088762,
       "tag": "0009_scheduled_reminder",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790971813101,
+      "tag": "0010_lab",
+      "breakpoints": true
     }
   ]
 }

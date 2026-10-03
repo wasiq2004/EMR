@@ -126,6 +126,7 @@ async function up() {
           'multiLocation',
           'pharmacy',
           'analytics',
+          'lab',
         ].map((key) => [key, true]),
       ),
     );

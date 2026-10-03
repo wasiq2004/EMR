@@ -11,7 +11,7 @@
  */
 
 import { z } from 'zod';
-import { AuditFields, IsoDateTime, Uuid } from './common';
+import { AuditFields, IsoDateTime, Paise, Uuid } from './common';
 import {
   AllergyCategory,
   AllergyCriticality,
@@ -800,3 +800,163 @@ export const PatientSnapshot = z.object({
   outstandingPaise: z.number().int(),
 });
 export type PatientSnapshot = z.infer<typeof PatientSnapshot>;
+
+/* ------------------------------------------------------------------------- *
+ * Lab — orders and results
+ * ------------------------------------------------------------------------- */
+
+export const LabOrderStatus = z.enum(['ORDERED', 'RESULTED', 'REVIEWED', 'CANCELLED']);
+export type LabOrderStatus = z.infer<typeof LabOrderStatus>;
+
+export const LAB_ORDER_STATUS_LABEL: Record<LabOrderStatus, string> = {
+  ORDERED: 'Awaiting result',
+  /** Arrived, NOT read. The distinction is the point of the module. */
+  RESULTED: 'Result in, not reviewed',
+  REVIEWED: 'Reviewed',
+  CANCELLED: 'Cancelled',
+};
+
+export const LabInterpretation = z.enum(['NORMAL', 'LOW', 'HIGH', 'CRITICAL', 'ABNORMAL']);
+export type LabInterpretation = z.infer<typeof LabInterpretation>;
+
+export const LabTestCatalogueItem = z.object({
+  id: Uuid,
+  code: z.string().nullable(),
+  codeSystem: z.string().nullable(),
+  name: z.string(),
+  category: z.string().nullable(),
+  unit: z.string().nullable(),
+  referenceLow: z.number().nullable(),
+  referenceHigh: z.number().nullable(),
+  pricePaise: Paise.nullable(),
+  /** Whether this clinic added it, rather than it coming from the shared set. */
+  isOwn: z.boolean().default(false),
+});
+export type LabTestCatalogueItem = z.infer<typeof LabTestCatalogueItem>;
+
+/**
+ * Ordering a test.
+ *
+ * `catalogueItemId` is optional, and free text is a first-class path for the
+ * same reason it is for diagnoses and drugs: a doctor ordering something the
+ * catalogue does not list must be able to write it down, not pick the nearest
+ * wrong test. The order keeps its own `testName` either way, because it is a
+ * record of what was asked for and has to still say that after the catalogue
+ * entry is renamed.
+ */
+export const OrderLabTest = z.object({
+  patientId: Uuid,
+  encounterId: Uuid.nullish(),
+  catalogueItemId: Uuid.nullish(),
+  testName: z.string().trim().min(2, 'Name the test'),
+  clinicalNote: z.string().trim().max(500).nullish(),
+  isUrgent: z.boolean().default(false),
+});
+export type OrderLabTest = z.infer<typeof OrderLabTest>;
+
+/**
+ * Entering a result.
+ *
+ * NO `interpretation` FIELD. It is derived server-side from the reference range,
+ * like the vitals: a caller that could assert a result was normal would make the
+ * field say only what it chose to claim, which is worse than absent on a record
+ * somebody later relies on.
+ *
+ * Either a number or text, and the database enforces that one is present. A
+ * result with neither is not a result.
+ */
+export const EnterLabResult = z.object({
+  valueNumeric: z.number().nullish(),
+  valueText: z.string().trim().max(2000).nullish(),
+  /** Overrides the catalogue's unit only when the lab reported a different one. */
+  unit: z.string().trim().max(40).nullish(),
+  /**
+   * The range the LAB quoted, where it differs from the catalogue's.
+   *
+   * Labs disagree about reference ranges, and the one printed on the report is
+   * the one the result should be judged against. Omitted, the catalogue's is
+   * used; either way the range is copied onto the result so a later correction
+   * to the catalogue cannot reclassify it.
+   */
+  referenceLow: z.number().nullish(),
+  referenceHigh: z.number().nullish(),
+  specimenAt: IsoDateTime.nullish(),
+  performedBy: z.string().trim().max(120).nullish(),
+  labNote: z.string().trim().max(1000).nullish(),
+  documentId: Uuid.nullish(),
+  /**
+   * Set when this corrects a result already entered.
+   *
+   * A lab that phones to correct a potassium does not change what was ordered,
+   * and overwriting in place would destroy the record of what the doctor acted
+   * on — so a correction supersedes the previous row and has to say why.
+   */
+  supersedesReason: z.string().trim().min(3, 'Say why it is being corrected').nullish(),
+}).refine(
+  (v) => v.valueNumeric != null || (v.valueText != null && v.valueText.length > 0),
+  { message: 'Enter a value, or the text the lab reported', path: ['valueNumeric'] },
+);
+export type EnterLabResult = z.infer<typeof EnterLabResult>;
+
+export const LabResult = z.object({
+  id: Uuid,
+  valueNumeric: z.number().nullable(),
+  valueText: z.string().nullable(),
+  unit: z.string().nullable(),
+  referenceLow: z.number().nullable(),
+  referenceHigh: z.number().nullable(),
+  interpretation: LabInterpretation.nullable(),
+  specimenAt: IsoDateTime.nullable(),
+  resultedAt: IsoDateTime,
+  performedBy: z.string().nullable(),
+  labNote: z.string().nullable(),
+  documentId: Uuid.nullable(),
+  supersededAt: IsoDateTime.nullable(),
+  supersededReason: z.string().nullable(),
+  enteredBy: Uuid,
+  enteredByName: z.string().nullable(),
+});
+export type LabResult = z.infer<typeof LabResult>;
+
+export const LabOrder = z.object({
+  id: Uuid,
+  patientId: Uuid,
+  patientName: z.string(),
+  patientMrn: z.string(),
+  encounterId: Uuid.nullable(),
+  catalogueItemId: Uuid.nullable(),
+  testName: z.string(),
+  unit: z.string().nullable(),
+  status: LabOrderStatus,
+  clinicalNote: z.string().nullable(),
+  isUrgent: z.boolean(),
+  orderedAt: IsoDateTime,
+  orderedBy: Uuid,
+  orderedByName: z.string().nullable(),
+  reviewedAt: IsoDateTime.nullable(),
+  reviewedBy: Uuid.nullable(),
+  reviewedByName: z.string().nullable(),
+  cancelledReason: z.string().nullable(),
+  /** The live result, if one is in. Superseded ones are not here. */
+  result: LabResult.nullable(),
+});
+export type LabOrder = z.infer<typeof LabOrder>;
+
+/**
+ * The doctor's "results to review" card.
+ *
+ * `awaitingReview` is the number that matters: a result that arrived and nobody
+ * opened is the failure this module exists to make visible. `overdue` counts
+ * orders placed long enough ago that the result should have come back — an
+ * order the patient never went for looks exactly like one the lab is slow with,
+ * and both need chasing.
+ */
+export const LabReviewSummary = z.object({
+  awaitingReview: z.number().int(),
+  abnormalAwaitingReview: z.number().int(),
+  criticalAwaitingReview: z.number().int(),
+  awaitingResult: z.number().int(),
+  /** Ordered more than 14 days ago with still no result. */
+  overdue: z.number().int(),
+});
+export type LabReviewSummary = z.infer<typeof LabReviewSummary>;

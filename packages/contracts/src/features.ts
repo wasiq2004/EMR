@@ -66,6 +66,13 @@ export const FEATURES = [
     implies: [] as readonly string[],
   },
   {
+    key: 'lab',
+    label: 'Lab orders and results',
+    description:
+      'Order tests, record what comes back, and see which results nobody has read yet. For a clinic that sends patients to an outside lab — it does not run a lab, and expects the report to arrive on paper or as a PDF.',
+    implies: [] as readonly string[],
+  },
+  {
     key: 'analytics',
     label: 'Governed analytics',
     description:

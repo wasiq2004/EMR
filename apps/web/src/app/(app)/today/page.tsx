@@ -25,6 +25,7 @@ import { useQueue, useStartConsultation } from '@/features/queue/api';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Panel, PanelBody, PanelHeader, PageHeader, Stat } from '@/components/ui/surface';
+import { ResultsToReviewCard } from '@/features/lab/results-to-review-card';
 import { EmptyState, SkeletonRows } from '@/components/ui/feedback';
 
 /**
@@ -214,6 +215,16 @@ function DoctorHome() {
 
   return (
     <>
+      {/*
+        Above the next patient, deliberately.
+        
+        An unread abnormal result should be seen BEFORE the doctor calls the next
+        person in — that is the whole value of surfacing it on the dashboard
+        rather than leaving it on a page somebody visits when they remember to.
+        It renders nothing when there is nothing waiting.
+      */}
+      <ResultsToReviewCard />
+
       {next ? (
         <Panel className="border-accent/40 bg-accent-soft/40">
           <PanelBody className="flex flex-wrap items-center gap-4">
@@ -356,7 +367,11 @@ function NurseHome() {
   const waiting = queue.data?.waiting ?? [];
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
+    <div className="flex flex-col gap-4">
+      {/* The nurse is often the one who types a report in when it arrives. */}
+      <ResultsToReviewCard />
+
+      <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
       <Panel>
         <PanelHeader
           title="Waiting for vitals"
@@ -396,6 +411,7 @@ function NurseHome() {
         )}
       </Panel>
       <DoctorTaskPanel />
+      </div>
     </div>
   );
 }

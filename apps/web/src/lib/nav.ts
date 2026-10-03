@@ -14,6 +14,7 @@
 import {
   Activity,
   Banknote,
+  BarChart3,
   CalendarDays,
   ClipboardList,
   FileText,
@@ -184,6 +185,18 @@ const ALL_SECTIONS: NavSection[] = [
         permission: 'document:read',
       },
       {
+        label: 'Lab',
+        href: '/lab',
+        icon: FlaskConical,
+        /*
+         * `labOrder:read`, which the doctor, the nurse and the administrator
+         * hold and reception does not. A lab result is clinical content — a
+         * measured fact about somebody's body — and the front desk has no
+         * reason to see one.
+         */
+        permission: 'labOrder:read',
+      },
+      {
         label: 'Tasks',
         href: '/tasks',
         icon: ClipboardList,
@@ -226,6 +239,12 @@ const ALL_SECTIONS: NavSection[] = [
         href: '/billing',
         icon: Banknote,
         permission: 'invoice:read',
+      },
+      {
+        label: 'Clinic analytics',
+        href: '/reports/analytics',
+        icon: BarChart3,
+        permission: 'report:read',
       },
       {
         label: 'Reports',
