@@ -66,12 +66,18 @@ export function CredentialReveal({
           <span className="text-2xs uppercase tracking-wide text-ink-faint">
             One-time password
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {/*
-              `select-all` so one click grabs the whole string. A password read off a
-              screen in parts is a password typed wrong.
+              SIZED TO BE READ ALOUD, which is the only way it gets delivered —
+              there is no mail provider, so an administrator says it down the
+              desk or over a phone. Monospace with wide tracking so the
+              characters this alphabet confuses are distinguishable: base64url
+              mixes l/I/1 and O/0, and carries - and _.
+
+              `select-all` so one click grabs the whole string. A password read
+              off a screen in parts is a password typed wrong.
             */}
-            <code className="token select-all rounded-sm border border-warning-line bg-surface px-2 py-1 text-md font-semibold text-ink">
+            <code className="token select-all rounded-md border border-warning-line bg-surface px-3 py-2 text-lg font-semibold tracking-[0.12em] text-ink">
               {password}
             </code>
             <Button size="sm" variant="secondary" onClick={copy}>
@@ -79,6 +85,13 @@ export function CredentialReveal({
               {copied ? 'Copied' : 'Copy'}
             </Button>
           </div>
+          {/*
+            Said explicitly because it is the usual reason a correctly-read
+            password is rejected at the sign-in screen.
+          */}
+          <p className="mt-1 text-2xs text-ink-faint">
+            Case-sensitive, and it may contain a hyphen or an underscore.
+          </p>
         </div>
       </div>
 

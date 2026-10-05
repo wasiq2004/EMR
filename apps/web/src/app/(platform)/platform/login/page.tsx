@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ShieldAlert } from 'lucide-react';
 import { ApiError, api } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
-import { Field, Input } from '@/components/ui/field';
+import { Field, Input, PasswordInput } from '@/components/ui/field';
 import { Alert } from '@/components/ui/feedback';
 
 /**
@@ -72,9 +72,12 @@ export default function PlatformLoginPage() {
           </Field>
 
           <Field label="Password" htmlFor="op-password" required>
-            <Input
+            {/*
+              An operator password is 12 random bytes rather than 9, so it is
+              the longest credential anybody in this product types by hand.
+            */}
+            <PasswordInput
               id="op-password"
-              type="password"
               autoComplete="current-password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}

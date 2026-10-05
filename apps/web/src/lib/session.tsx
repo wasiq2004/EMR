@@ -47,7 +47,7 @@ export function SessionProvider({
    */
   const isRestoring = useIsRestoring();
 
-  const { data, status, fetchStatus } = useQuery({
+  const { data, status } = useQuery({
     queryKey: qk.session,
     queryFn: () => api.get<Session>('/auth/me'),
     initialData: initialSession ?? undefined,
@@ -55,7 +55,11 @@ export function SessionProvider({
     retry: false,
   });
 
-  const isLoading = isRestoring || status === 'pending' || fetchStatus === 'fetching';
+  const isLoading = isSessionLoading({
+    isRestoring,
+    status,
+    hasSession: data !== undefined,
+  });
 
   const value = React.useMemo(
     () => ({ session: data ?? null, isLoading }),
@@ -63,6 +67,52 @@ export function SessionProvider({
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
+}
+
+/**
+ * Whether we still do not know who the signed-in user is.
+ *
+ * A PURE FUNCTION WITH TESTS, because the obvious way to write this is wrong in
+ * a way nothing catches. `isLoading` here does not mean "a request is in
+ * flight" — it means "we cannot yet say who this is", and the authenticated
+ * layout replaces the ENTIRE APP with a spinner while it is true.
+ *
+ * THE BUG THIS FIXES. The condition used to include `fetchStatus === 'fetching'`,
+ * so any background refetch of `/auth/me` blanked the whole clinic to a spinner
+ * and then remounted it. Remounting discards React state, and the state it
+ * discarded was the state that mattered: the staff screen invalidates the
+ * session after every mutation — correctly, because an administrator who renames
+ * or demotes someone should see their own sidebar change rather than keep a
+ * stale one — so **creating a staff member or issuing a password unmounted the
+ * dialog that was displaying the one-time password.**
+ *
+ * The password flashed up and vanished with the dialog. It is not stored in
+ * plaintext and cannot be shown again, so the only recovery was to issue
+ * another one and watch that disappear too. From the outside it looked like no
+ * password was being generated at all, which is how it was reported.
+ *
+ * `hasSession` is checked FIRST and short-circuits. Once we know who the user
+ * is we are never "loading" again, whatever a refetch is doing — a slightly
+ * stale session for a few hundred milliseconds is correct, and is what every
+ * other screen in this product already assumes. The restore case the comment
+ * above describes is still covered: during restoration there is no data, so
+ * `isRestoring` and `pending` both still hold.
+ */
+export function isSessionLoading(state: {
+  /** The persisted query cache is still being read off the device. */
+  isRestoring: boolean;
+  status: 'pending' | 'error' | 'success';
+  /** We have a session object — from the server, the cache, or a fetch. */
+  hasSession: boolean;
+}): boolean {
+  // Knowing who the user is settles the question. A refetch in the background
+  // must never blank the app, because blanking it destroys what is on screen.
+  if (state.hasSession) return false;
+
+  // No session yet. Both of these mean "not yet known" rather than "nobody":
+  // returning false here is what bounced a signed-in user to the sign-in screen
+  // on a cold load of a deep link.
+  return state.isRestoring || state.status === 'pending';
 }
 
 export function useSession(): Session {

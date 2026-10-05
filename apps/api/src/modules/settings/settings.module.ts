@@ -241,17 +241,66 @@ export class SettingsService {
     return safe;
   }
 
-  /** No self-service reset exists, so an administrator does it from here. */
+  /**
+   * No self-service reset exists, so an administrator does it from here.
+   *
+   * `passwordChangedAt` IS SET TO NULL, NOT TO NOW. This looks like a nicety and
+   * is not. The field records when the USER last chose their own password, and an
+   * administrator issuing a temporary one is the opposite of that — so stamping
+   * it with the current time asserts the user picked this password themselves, at
+   * the moment somebody else picked it for them.
+   *
+   * Two things depend on that distinction. The dialog tells the administrator
+   * "until they change it, the account records that its password has never been
+   * changed from the one issued here", which was simply untrue. And a
+   * force-change-on-first-sign-in gate is keyed on exactly this field — nothing
+   * reads it yet, so this was not an open hole, but it was a trap set for
+   * whoever adds that gate: every reset account would have looked as though its
+   * owner had already chosen a password.
+   *
+   * The operator reset in `platform-admin.service.ts` already writes null here.
+   * These two paths do the same job and now agree.
+   */
   async resetPassword(userId: string): Promise<{ temporaryPassword: string }> {
     const temporary = randomBytes(9).toString('base64url');
     const hash = await this.passwords.hash(temporary);
 
-    await this.tenantDb.run((tx) =>
-      tx
+    await this.tenantDb.run(async (tx) => {
+      const changed = await tx
         .update(schema.appUser)
-        .set({ passwordHash: hash, passwordChangedAt: new Date(), failedLoginAttempts: 0, lockedUntil: null })
-        .where(eq(schema.appUser.id, userId)),
-    );
+        .set({
+          passwordHash: hash,
+          passwordChangedAt: null,
+          // Cleared so an administrator's reset also rescues a locked-out
+          // account — otherwise the new password is refused by the lockout.
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+        })
+        .where(eq(schema.appUser.id, userId))
+        .returning({ id: schema.appUser.id });
+
+      /*
+       * THE ROW COUNT IS THE CHECK, and it was missing.
+       *
+       * Every table here is under forced row-level security, so an UPDATE whose
+       * row falls outside the caller's clinic does not raise — it affects zero
+       * rows and returns normally. This method then handed back a password that
+       * had been generated, hashed, and stored nowhere. The administrator read
+       * it out, the staff member could not sign in with it, and nothing anywhere
+       * said why. The same shape has bitten this codebase before: sign-in, the
+       * clinic-status check and every audit write all silently affected nothing
+       * until their row counts were checked.
+       *
+       * A missing or out-of-clinic user is the realistic cause — a stale staff
+       * list offering a Reset button for somebody since removed — so it is a 404
+       * rather than a 500.
+       */
+      if (changed.length !== 1) {
+        throw new NotFoundException(
+          'That staff member could not be found, so no password was issued.',
+        );
+      }
+    });
 
     return { temporaryPassword: temporary };
   }

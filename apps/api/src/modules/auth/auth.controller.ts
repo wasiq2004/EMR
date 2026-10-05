@@ -8,10 +8,10 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { LoginInput, MfaInput } from '@emr/contracts';
+import { ChangePasswordInput, LoginInput, MfaInput } from '@emr/contracts';
 import { config } from '../../config';
 import { parseBody } from '../../common/http/zod.pipe';
-import { Authenticated, Public, SkipAudit } from '../../common/http/decorators';
+import { Audit, Authenticated, Public, SkipAudit } from '../../common/http/decorators';
 import { TenantContext } from '../../common/tenancy/tenant-context';
 import {
   ACCESS_COOKIE,
@@ -84,6 +84,39 @@ export class AuthController {
     const result = await this.auth.refresh(token);
     setSessionCookies(res, result.accessToken, result.refreshToken, result.refreshTtlSeconds);
     return { session: result.session };
+  }
+
+  /**
+   * Changes your own password.
+   *
+   * NO PERMISSION CHECK, and that is correct rather than an omission: there is
+   * no `user:changeOwnPassword` permission because every role must be able to
+   * do this, including an auditor who holds almost nothing. `@Authenticated()`
+   * is the whole requirement, and the user id comes from the verified token —
+   * never from the body — so this route cannot be aimed at somebody else's
+   * account. Changing another person's password is `POST /users/:id/reset-password`,
+   * which does require `user:update`.
+   *
+   * Audited as its own action. "Somebody changed their password at 14:02" is a
+   * question an investigation asks, and a generic POST_AUTH row does not answer
+   * it.
+   */
+  @Authenticated()
+  @Audit('PASSWORD_CHANGED', 'user')
+  @Post('change-password')
+  async changePassword(@Body() body: unknown) {
+    const ctx = TenantContext.get();
+    if (!ctx) throw new UnauthorizedException('Please sign in.');
+
+    const input = parseBody(ChangePasswordInput, body);
+
+    return this.auth.changeOwnPassword({
+      clinicId: ctx.clinicId,
+      userId: ctx.userId,
+      jti: ctx.jti,
+      currentPassword: input.currentPassword,
+      newPassword: input.newPassword,
+    });
   }
 
   @Authenticated()

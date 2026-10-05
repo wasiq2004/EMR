@@ -120,31 +120,67 @@ export class PlatformSupportService {
       client.release();
     }
 
-    // The plan goes on afterwards, through the console's own connection —
-    // subscription is a platform table and does not need the wider privilege.
-    if (input.planId) {
-      const [plan] = await this.platform.db
-        .select()
-        .from(schema.plan)
-        .where(eq(schema.plan.id, input.planId))
-        .limit(1);
+    /*
+     * The plan goes on afterwards, through the console's own connection —
+     * subscription is a platform table and does not need the wider privilege.
+     *
+     * A SUBSCRIPTION ROW IS WRITTEN EITHER WAY, and that is the fix to a real
+     * trap. `planId` is optional, and this used to insert nothing when it was
+     * omitted — leaving a clinic with NO subscription at all. `FeatureGuard`
+     * resolves a missing subscription to every flag false, so that clinic had
+     * billing, reports, documents, WhatsApp, broadcasts, pharmacy, lab,
+     * analytics and import/export all switched off, and nobody was told. The
+     * first person to notice is whichever member of staff lands on a gated
+     * screen and reads "your administrator can ask us to add it" — which is
+     * precisely the complaint that led here, arrived at by the other route.
+     *
+     * An absent row and a deliberate empty plan were indistinguishable. Now the
+     * commercial state of every clinic is recorded explicitly, and `planAssigned`
+     * in the response lets the console say so at the moment of onboarding rather
+     * than leaving it to be discovered.
+     */
+    const plan = input.planId
+      ? (
+          await this.platform.db
+            .select()
+            .from(schema.plan)
+            .where(eq(schema.plan.id, input.planId))
+            .limit(1)
+        )[0]
+      : undefined;
 
-      if (plan) {
-        await this.platform.db.insert(schema.subscription).values({
-          clinicId,
-          planId: plan.id,
-          plan: plan.code,
-          status: plan.trialDays > 0 ? 'TRIAL' : 'ACTIVE',
-          monthlyPricePaise: plan.monthlyPricePaise,
-          maxPractitioners: plan.maxPractitioners,
-          maxPatients: plan.maxPatients,
-          includedMessagesPerMonth: plan.includedMessagesPerMonth,
-          trialEndsAt:
-            plan.trialDays > 0
-              ? new Date(Date.now() + plan.trialDays * 86_400_000)
-              : null,
-        });
-      }
+    if (plan) {
+      await this.platform.db.insert(schema.subscription).values({
+        clinicId,
+        planId: plan.id,
+        plan: plan.code,
+        status: plan.trialDays > 0 ? 'TRIAL' : 'ACTIVE',
+        monthlyPricePaise: plan.monthlyPricePaise,
+        maxPractitioners: plan.maxPractitioners,
+        maxPatients: plan.maxPatients,
+        includedMessagesPerMonth: plan.includedMessagesPerMonth,
+        trialEndsAt:
+          plan.trialDays > 0
+            ? new Date(Date.now() + plan.trialDays * 86_400_000)
+            : null,
+      });
+    } else {
+      /*
+       * No plan chosen, or a planId that no longer resolves.
+       *
+       * Deliberately NOT granted any features here: inventing a feature set
+       * would be inventing a price, and a clinic given modules nobody sold it is
+       * the one failure direction the whole feature registry exists to prevent.
+       * What this row buys is that the state is explicit — `unassigned` is a
+       * thing an operator can see and search for, where a missing row was not.
+       */
+      await this.platform.db.insert(schema.subscription).values({
+        clinicId,
+        planId: null,
+        plan: 'unassigned',
+        status: 'TRIAL',
+        monthlyPricePaise: 0,
+      });
     }
 
     await this.audit(actor, 'CLINIC_ONBOARDED', clinicId, input.name, {
@@ -158,6 +194,14 @@ export class PlatformSupportService {
       // Shown once. Read it out — there is no mail provider, and saying so
       // beats leaving a new clinic waiting for an email.
       temporaryPassword: temporary,
+      /*
+       * False means every optional module is off for this clinic. The console
+       * says so on the success screen, because the alternative is a clinic that
+       * looks onboarded and cannot bill, prescribe against a counter, or send a
+       * reminder — and the first symptom is a member of staff being told to
+       * contact their administrator.
+       */
+      planAssigned: Boolean(plan),
     };
   }
 

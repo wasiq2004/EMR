@@ -716,3 +716,174 @@ test('the operations console login renders without a session', async ({ browser 
     await anonymous.close();
   }
 });
+
+/* -------------------------------------------------------------------------- *
+ * The one-time password has to survive long enough to be read
+ *
+ * Only a real browser can catch what went wrong here, and the chain is worth
+ * writing down because every link in it looked correct on its own:
+ *
+ *   1. The admin creates a staff member. The server mints a random password and
+ *      returns it; the dialog puts it on screen.
+ *   2. The mutation invalidates the session query — reasonably, so an
+ *      administrator who renames someone sees their own sidebar update.
+ *   3. The session provider reported `isLoading` while that refetch was in
+ *      flight, because the condition included `fetchStatus === 'fetching'`.
+ *   4. The authenticated layout replaces the ENTIRE APP with a spinner while
+ *      `isLoading` is true. The dialog unmounted, taking its React state with
+ *      it — and the password is argon2-hashed before the row is written, so the
+ *      only plaintext copy in existence was the one just discarded.
+ *
+ * Nothing threw. No request failed. The password appeared for a few hundred
+ * milliseconds and then both it and the dialog were gone, which from the
+ * outside is indistinguishable from no password being generated at all — which
+ * is how it was reported.
+ *
+ * So the assertion is not "a password is rendered" but "a password is STILL
+ * rendered after the refetch that used to destroy it". A unit test covers the
+ * predicate; this covers the four links joined together.
+ * -------------------------------------------------------------------------- */
+
+test('a new staff account shows a password that stays on screen', async ({ page }) => {
+  const problems = watchConsole(page);
+  await signIn(page, 'OWNER_ADMIN');
+  await visit(page, '/settings/users', problems);
+
+  await page.getByRole('button', { name: /add a staff member/i }).first().click();
+
+  // A unique email per run: the server returns 409 on a duplicate, and this
+  // suite runs repeatedly against the same clinic.
+  const unique = `verify.staff.${Date.now()}@example.test`;
+  await page.getByLabel(/full name/i).fill('Password Reveal Check');
+  await page.getByLabel(/^email/i).fill(unique);
+
+  await page.getByRole('button', { name: /create account/i }).click();
+
+  // The reveal, by its heading rather than its text — the wording is allowed to
+  // change, the fact that one appears is not.
+  const reveal = page.getByText(/write this down now/i);
+  await expect(reveal).toBeVisible({ timeout: 10_000 });
+
+  /*
+   * The password itself. Read from the <code> element rather than asserted
+   * against a pattern, because the point is that SOMETHING readable is there —
+   * an empty or whitespace-only element would satisfy a visibility check.
+   */
+  const secret = page.locator('code').filter({ hasText: /\S/ }).first();
+  await expect(secret).toBeVisible();
+  const shown = (await secret.innerText()).trim();
+  expect(shown.length, `the password element was empty: ${JSON.stringify(shown)}`)
+    .toBeGreaterThan(7);
+
+  /*
+   * THE ACTUAL REGRESSION. Wait out the session refetch and the app remount it
+   * used to trigger. If the layout blanks, the dialog is gone by now.
+   */
+  await page.waitForTimeout(2500);
+
+  await expect(
+    reveal,
+    'the password dialog was unmounted before it could be read — the session ' +
+      'refetch is blanking the app again',
+  ).toBeVisible();
+  expect(
+    (await secret.innerText()).trim(),
+    'the dialog survived but the password changed or emptied',
+  ).toBe(shown);
+
+  // Still no console errors, and the app is still rendered rather than spinning.
+  expect(problems, 'the staff screen reported problems').toEqual([]);
+
+  await page.getByRole('button', { name: /^done$/i }).click();
+
+  // And the account is actually in the list afterwards.
+  await expect(page.getByText('Password Reveal Check')).toBeVisible();
+});
+
+test('issuing a new password shows it and keeps it visible', async ({ page }) => {
+  const problems = watchConsole(page);
+  await signIn(page, 'OWNER_ADMIN');
+  await visit(page, '/settings/users', problems);
+
+  // Reset somebody else's — the suite's own doctor fixture. Resetting the
+  // signed-in administrator's would invalidate the session this test is using.
+  // By EMAIL, not by role name. The role badge text is presentational and the
+  // admin's own row could match a loose pattern — resetting the signed-in
+  // administrator's password would invalidate the session this test runs on.
+  const row = page
+    .locator('li')
+    .filter({ hasText: `doctor@${DOMAIN}` })
+    .first();
+  await row.getByRole('button', { name: /reset password/i }).click();
+
+  await page.getByRole('button', { name: /issue a new password/i }).click();
+
+  const reveal = page.getByText(/write this down now/i);
+  await expect(reveal).toBeVisible({ timeout: 10_000 });
+
+  const secret = page.locator('code').filter({ hasText: /\S/ }).first();
+  const shown = (await secret.innerText()).trim();
+  expect(shown.length, 'the issued password was not displayed').toBeGreaterThan(7);
+
+  // The same wait, for the same reason as the invite test above.
+  await page.waitForTimeout(2500);
+  await expect(
+    reveal,
+    'the issued password vanished before it could be read',
+  ).toBeVisible();
+  expect((await secret.innerText()).trim()).toBe(shown);
+
+  expect(problems, 'the reset dialog reported problems').toEqual([]);
+});
+
+/* -------------------------------------------------------------------------- *
+ * The password reveal, on every panel that has one
+ *
+ * Asserted on the `type` attribute rather than on the icon, because the icon
+ * swapping while the input stays masked is exactly the failure that would look
+ * right in a screenshot and help nobody.
+ *
+ * The toggle also has to NOT submit the form. A button inside a form defaults
+ * to `type="submit"`, so getting that wrong would attempt a sign-in with a
+ * half-typed password and burn a failed-login attempt against the lockout
+ * counter on every click — so the test types a deliberately wrong password,
+ * toggles, and checks it is still sitting on the sign-in screen.
+ * -------------------------------------------------------------------------- */
+
+for (const panel of [
+  { name: 'the clinic sign-in', path: '/login' },
+  { name: 'the operations console sign-in', path: '/platform/login' },
+]) {
+  test(`${panel.name} can reveal the password without submitting`, async ({ browser }) => {
+    const anonymous = await browser.newContext();
+    try {
+      const page = await anonymous.newPage();
+      const problems = watchConsole(page);
+      await visit(page, panel.path, problems);
+
+      const field = page.locator('input[type="password"], input[name="password"]').first();
+      await field.fill('deliberately-wrong-password');
+
+      // Masked to begin with. A reveal that defaults to visible is not a reveal.
+      await expect(field).toHaveAttribute('type', 'password');
+
+      const toggle = page.getByRole('button', { name: /show password/i });
+      await expect(toggle).toBeVisible();
+      await toggle.click();
+
+      const revealed = page.locator('input[name="password"], input#op-password').first();
+      await expect(revealed).toHaveAttribute('type', 'text');
+      await expect(revealed).toHaveValue('deliberately-wrong-password');
+
+      // It did not submit: still on the sign-in screen, nothing errored.
+      expect(page.url()).toContain(panel.path);
+      expect(problems, `${panel.path} reported problems`).toEqual([]);
+
+      // And it goes back.
+      await page.getByRole('button', { name: /hide password/i }).click();
+      await expect(revealed).toHaveAttribute('type', 'password');
+    } finally {
+      await anonymous.close();
+    }
+  });
+}

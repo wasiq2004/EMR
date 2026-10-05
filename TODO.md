@@ -954,6 +954,277 @@ entry exists.
       row refused, idempotent re-adding, the clinic's own drug searchable and
       prescribable, and the schedule stored null rather than guessed.
 
+## "The pharmacist is told to contact the admin" — 2026-10-06
+
+Diagnosed against the live database, not guessed. **The pharmacist account was
+fine and the guard was right. The PLAN was stale.**
+
+`FEATURES` in `packages/contracts/src/features.ts` carries eleven keys. Every
+plan row in the catalogue carried eight:
+
+    billing, reports, whatsapp, documents, broadcasts,
+    multiLocation, dataPortability, teleconsultation
+
+Absent from all of them: **pharmacy, lab, analytics** — the three modules added
+in the last three stages of work. `resolveFeatures` treats an absent key as
+false, deliberately and correctly, so all three were off for every clinic on a
+catalogue plan. Confirmed by query: `plan_pharmacy` was NULL on `pilot`,
+`clinic` and `clinic-plus` alike.
+
+**Why it looked like a pharmacist problem.** `landingRouteFor` sends a
+pharmacist to `/pharmacy` and an analyst to `/analytics`, because neither has a
+clinic dashboard to land on. So those two roles met the gate on the FIRST screen
+after sign-in, which reads as a broken account rather than an unpriced module. A
+doctor would have noticed later, on the lab tab. `nuvalyf` worked because it
+happened to carry an explicit per-clinic override; `wasiq-testing` did not,
+which is why it looked inconsistent.
+
+**Why no test caught it.** `fixtures.mjs` gives the fixture clinic a feature
+OVERRIDE turning all eleven on — correct for the clinical suites, which test
+clinic behaviour rather than a price list. But it meant no test ever asked
+whether a clinic on a REAL catalogue plan could reach the pharmacy. The gap was
+between the plan catalogue and the feature registry, and nothing was looking
+there.
+
+- [x] **Migration `0017` backfills the absent keys**, and only the absent ones —
+      `'{...}'::jsonb || features` puts the existing value on the right and the
+      right operand wins, so an operator who deliberately switched a module off
+      keeps that decision.
+
+      It grants the three modules on `clinic-plus` ONLY. That is the top tier,
+      and a top tier missing three shipped modules is unambiguously a mistake
+      rather than a pricing decision. Every other plan gets them written as
+      explicit FALSE: no behavioural change, but the console's plan editor
+      renders from the registry, so they stop being invisible and can be priced
+      deliberately. **The migration does not invent a price for a module nobody
+      has priced** — changing that needs no migration, just the Plans screen or
+      a per-clinic override.
+
+      Applied to the running database. `wasiq-testing` now resolves pharmacy,
+      lab and analytics to true.
+- [x] **The migration asserts the gap is closed** — every plan must mention all
+      eleven keys, and a clinic on the top tier must resolve `pharmacy` to true.
+      That second assertion is the one that would have caught this.
+- [x] **`platform.sh` now asserts it on every run**, reading `FEATURE_KEYS` from
+      the API container's own build rather than a hardcoded list — so adding a
+      twelfth feature fails the suite until somebody prices it. Also asserts no
+      plan grants `analytics` without `reports`, since that dependency makes the
+      grant a silent no-op.
+- [x] **Onboarding a clinic with no plan no longer creates a featureless ghost.**
+      Same symptom, different route, and worse: `planId` is optional and the
+      service used to insert NO subscription row at all when it was omitted.
+      `FeatureGuard` resolves a missing subscription to every flag false, so that
+      clinic had all nine optional modules off and nobody was told — an absent
+      row and a deliberate empty plan were indistinguishable.
+
+      A subscription row is now always written, `plan: 'unassigned'` when none
+      was chosen, with no features granted — inventing a feature set would be
+      inventing a price, and a clinic given modules nobody sold it is the one
+      direction the registry exists to prevent. The response carries
+      `planAssigned`, and the console repeats the warning on the SUCCESS screen,
+      not just on the form: that is the last moment anybody looks at the clinic
+      before its staff do, and the first symptom otherwise is a staff member
+      being told to contact the administrator who is reading that screen.
+
+## "I reset the password and cannot sign in with it" — 2026-10-05
+
+Reported symptom: a password was changed, the screen said so, the new password
+did not work. **Two separate faults, either of which produces exactly that.**
+
+- [x] **`settings/account` called no API.** The form's submit handler cleared the
+      three fields and announced "Password changed. Your other sessions have been
+      signed out." There was no `POST /auth/change-password` on the server at
+      all. This is the one that matches the report: in the Doctor panel, change
+      your own password, get told it worked, and the old password is still the
+      only one that functions.
+
+      It is now real, and the parts that are not obvious:
+
+      * **The current password is verified first.** A valid session is not
+        sufficient authority to change the credential that session rests on —
+        otherwise a reception terminal left unlocked for two minutes becomes
+        permanent ownership of a clinician's account, and a clinician's account
+        signs prescriptions.
+      * **A wrong current password counts against the lockout**, exactly like a
+        failed sign-in. Without that, this form is an unthrottled oracle for
+        guessing the current password of whatever account a session belongs to —
+        the one place in the product where an attacker already holds a session
+        and needs only the password.
+      * **Other refresh sessions are revoked**, because the screen says they
+        are. The caller's own access token survives so they are not ejected from
+        the page they are standing on, but their refresh chain goes too, so the
+        session they keep expires within the access-token TTL instead of staying
+        renewable for weeks on a rotated credential. The toast reports the real
+        count.
+      * **`passwordChangedAt` is set to now**, and this is the one place that is
+        correct — the USER chose this password. An administrator issuing a
+        temporary one writes null, so the two cases stay distinguishable.
+      * **No permission check**, deliberately. Every role must be able to change
+        its own password, including the auditor who holds almost nothing.
+        `@Authenticated()` is the whole requirement, and the user id comes from
+        the verified token rather than the body, so the route cannot be aimed at
+        somebody else's account.
+      * Twelve characters, no composition rules. "One uppercase, one symbol"
+        pushes people to `Password1!` and then to writing it on the monitor.
+- [x] **The administrator's reset never checked its row count.** This one did
+      write, so it mostly worked — but every table here is under FORCED row-level
+      security, and an UPDATE whose row falls outside the caller's clinic does
+      not raise. It affects zero rows and returns normally. So the endpoint could
+      generate a password, hash it, store it nowhere, and hand it back: the
+      administrator reads it out, the staff member cannot sign in, and nothing
+      anywhere says why.
+
+      That is not hypothetical here — it is the same shape that already bit
+      sign-in, the clinic-status check and every audit write in this codebase,
+      all of which silently affected nothing until their row counts were
+      checked. Now `.returning()` and a `404` when it is not exactly one row.
+- [x] **Verification that cannot pass against a mock.** Roughly 25 new
+      assertions in `api-reads.sh`, and every one of them ends the same way: SIGN
+      IN WITH IT. A 200 from the change endpoint proves nothing — the only proof
+      is that the new password starts working and the old one stops. Both the
+      self-service change and the administrator's reset are checked that way,
+      against a throwaway account created and deactivated within the run so it
+      cannot lock out a fixture the rest of the suite depends on.
+
+      Also asserted: a wrong current password is refused, under-12 is refused,
+      reusing the current password is refused, a reset for a non-existent user
+      404s rather than returning a password stored nowhere, reception cannot
+      reset somebody else's, and the auditor CAN reach the change route (refused
+      on the password, not on a permission).
+
+## Password reveal, every panel — 2026-10-05
+
+- [x] **One `PasswordInput` in the UI kit, used by all six password fields.**
+      Shared for the same reason `CredentialReveal` is: the handling rules are
+      identical and writing them out six times is how one ends up without the
+      auto-hide, or with a toggle that submits the form. There are now zero raw
+      `type="password"` inputs left in the web app.
+
+      Clinic sign-in (every clinical role arrives through it), the operations
+      console sign-in, the three change-password fields, and the WhatsApp access
+      token.
+
+      Three details that are load-bearing rather than decorative:
+
+      * **`type="button"`.** A button inside a form defaults to submit, so
+        without it the toggle would attempt a sign-in with a half-typed password
+        and burn a failed-login attempt against the lockout counter on every
+        click.
+      * **It re-hides itself after 20 seconds.** The risk at a clinic is not
+        somebody reading over a shoulder during the two seconds it takes to
+        check a password — it is the receptionist who reveals it, gets called
+        away mid-sign-in, and leaves a credential in plaintext on a screen
+        facing the waiting room. Twenty seconds is long enough that nobody
+        checking their typing ever sees it expire.
+      * **Keyboard-reachable**, not `tabIndex={-1}`. Somebody working the
+        keyboard has the same reason to check what they typed.
+
+      The reveal is worth most in three specific places. On the clinic sign-in,
+      because there is no self-service reset — a password is issued by an
+      administrator and read out, it is base64url so it mixes l/I/1 and O/0 and
+      carries hyphens, and the only feedback on a typo is "email or password is
+      incorrect", which does not say which. On the confirm-password pair, because
+      "these do not match" between two masked fields gives you no way to tell
+      WHICH field has the typo. And on the WhatsApp token, because that one is
+      pasted rather than typed — a truncated copy or a leading space is invisible
+      behind dots, and surfaces much later as reminders that silently never send.
+- [x] **Two browser tests**, one per sign-in panel. They assert the input's
+      `type` attribute flips, not that the icon changed — an icon swapping while
+      the field stays masked is the failure that would look right in a
+      screenshot and help nobody. They also type a wrong password, toggle, and
+      confirm the page did not submit.
+
+### Found while doing this — since FIXED, see the next section
+- [x] **`settings/account` did not change your password.** Its `onSubmit`
+      calls no API at all — it shows "Password changed. Your other sessions have
+      been signed out." and clears the three fields. There is no
+      `POST /auth/change-password` anywhere on the server; `grep` for
+      `change-password` across `apps/api` and `packages/contracts` returns
+      nothing.
+
+      This is worse than an ordinary dead control, which is why it is listed
+      rather than quietly left: the screen asserts a security action completed
+      when nothing happened. Somebody who changes their password because they
+      think it was seen will believe the old one no longer works and that other
+      sessions were cut. Both claims are false.
+
+      The reveal toggles now work on those three fields, which is what was
+      asked for — but they are polish on a form that does not do its job, and
+      the fix is an endpoint (verify the current password, hash the new one,
+      set `passwordChangedAt`, revoke other refresh tokens), not a UI change.
+
+## Staff passwords — reported 2026-10-05
+
+Two complaints, one bug, and it was not in the staff code at all.
+
+> "when the admin create an staff... password should be randomly generated as it
+> is generated for the clinic admin, and even if i click on issue password, that
+> password is not visible in the UI"
+
+**The password was always randomly generated.** Both `invite` and `resetPassword`
+call `randomBytes(9).toString('base64url')` — the same generator that mints the
+clinic administrator's own password at provisioning. No screen in the product
+asks anyone to type a staff password, and none ever did. It read as absent
+because it was never legible on screen, which is the second complaint and the
+actual defect.
+
+- [x] **The session refetch was unmounting the app under the dialog.** The chain,
+      every link of which looked correct alone:
+
+      1. The staff mutation invalidates the session query — reasonably, so an
+         administrator who renames or demotes someone sees their own sidebar
+         change rather than a stale one.
+      2. `SessionProvider` computed `isLoading` as
+         `isRestoring || status === 'pending' || fetchStatus === 'fetching'`.
+         That last clause is true during ANY refetch, including a background one.
+      3. `RequireSession` in the authenticated layout replaces the **entire app**
+         with a spinner while `isLoading` is true.
+      4. The dialog unmounted, taking its React state with it — and the password
+         is argon2-hashed before the row is written, so the only plaintext copy
+         in existence was the one just discarded.
+
+      Nothing threw and no request failed. The password appeared for a few
+      hundred milliseconds and vanished with the dialog, which from the outside
+      is indistinguishable from no password being generated.
+
+      `isLoading` here does not mean "a request is in flight" — it means "we
+      cannot yet say who this is". It is now a tested pure function,
+      `isSessionLoading`, that short-circuits on having a session: once we know
+      who the user is, we are never loading again whatever a refetch is doing.
+      The cold-load case the old clause was protecting stays covered, because
+      during restoration there is no session and `isRestoring`/`pending` still
+      hold. **7 unit tests**, including the regression directly.
+
+      This was only ever visible on the staff screen because that is the only
+      place in the product that invalidates the session.
+- [x] **Narrowed the invalidation.** Creating an account and issuing a password
+      cannot change the acting user's own name or permissions, so they no longer
+      ask for the session to be refetched. Editing still does — rename yourself
+      and the sidebar should say so. Second line of defence rather than the fix.
+- [x] **`passwordChangedAt` was being set to now on a staff reset.** Found while
+      tracing the above. That field records when the USER last chose their own
+      password, so stamping it at the moment an ADMINISTRATOR issues a temporary
+      one asserts the opposite of what happened. It made the dialog's own
+      sentence — "the account records that its password has never been changed
+      from the one issued here" — untrue, and it is exactly the field a
+      force-change-on-first-sign-in gate keys on. Nothing reads it yet, so this
+      was not an open hole; it was a trap for whoever adds that gate, since every
+      reset account would have looked as though its owner had already chosen a
+      password. Now null, matching the operator reset in
+      `platform-admin.service.ts`, which already got this right.
+- [x] **Made the reveal harder to lose and easier to read.** The dialog is
+      `mandatory` once a password is showing — Escape, an outside click and the
+      corner close button are ordinary ways to change your mind while the form is
+      open, and destructive once the only copy of a password is on screen. The
+      password itself is set larger with wide tracking, because base64url mixes
+      l/I/1 and O/0 and this gets read down a desk or over a phone, and it now
+      says that it is case-sensitive and may contain a hyphen or underscore —
+      the usual reason a correctly-read password is refused at sign-in.
+- [x] **Two browser tests**, because only a real browser catches this: the unit
+      test covers the predicate, and these cover the four links joined together.
+      Both assert the password is STILL on screen after the refetch that used to
+      destroy it, not merely that one was rendered.
+
 ## Where verification actually stands — 2026-10-05
 
 Stated precisely, because "it typechecks" and "it works" are different claims
@@ -962,7 +1233,7 @@ and conflating them is how a green build ships a broken register.
 **Run, and green:**
 - Typecheck, all four projects: `contracts`, `db`, `api`, `web` — clean.
 - `eslint` on `apps/api` and `apps/web` — clean.
-- 171 web unit tests, 6 files.
+- 178 web unit tests, 7 files (7 new, on `isSessionLoading`).
 - **32 NEW api unit tests, 2 files** — the first unit tests this service has
   had. `apps/api` now carries vitest with a deliberately narrow brief: almost
   everything here is only true against a real Postgres with RLS on, which is
@@ -982,8 +1253,12 @@ and conflating them is how a green build ships a broken register.
 - `scripts/verify/api-reads.sh` — the consent, share-link-revoke and document
   upload blocks are new and never run.
 - `scripts/verify/availability.sh` — the idempotency block is new and never run.
-- `apps/web/e2e/smoke.spec.ts` — 4 new tests covering 25 previously unguarded
-  screens, never run.
+- `apps/web/e2e/smoke.spec.ts` — 8 new tests, never run: 4 covering 25
+  previously unguarded screens, 2 on the staff password reveal, 2 on the
+  password-visibility toggle.
+- `scripts/verify/api-reads.sh` — the password-change block (~25 assertions) is
+  new and never run. It is the one that proves the reported bug is fixed, since
+  it signs in with each password rather than trusting a 200.
 - `all.sh` now runs 11 suites: `api-reads availability consultation-flow
   reminders analytics lab pharmacy import research broadcast platform`.
 

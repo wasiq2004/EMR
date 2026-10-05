@@ -1,11 +1,14 @@
 'use client';
 
 import * as React from 'react';
+import { useMutation } from '@tanstack/react-query';
 import { ROLE_LABEL } from '@emr/contracts';
+import { ApiError, api } from '@/lib/api-client';
 import { useSession } from '@/lib/session';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Field, Input } from '@/components/ui/field';
+import { Field, PasswordInput } from '@/components/ui/field';
+import { Alert } from '@/components/ui/feedback';
 import { DataList, Panel, PanelBody, PanelHeader } from '@/components/ui/surface';
 import { ThemeSwitcher } from '@/components/layout/theme-switcher';
 import { useToast } from '@/components/ui/toast';
@@ -27,6 +30,51 @@ export default function AccountSettingsPage() {
 
   const mismatch = confirm.length > 0 && next !== confirm;
   const tooShort = next.length > 0 && next.length < 12;
+  const unchanged = next.length > 0 && next === current;
+
+  /**
+   * Changing your own password, for real.
+   *
+   * THIS FORM USED TO DO NOTHING. Its submit handler cleared the three fields
+   * and showed "Password changed. Your other sessions have been signed out." It
+   * called no API — there was no `POST /auth/change-password` on the server at
+   * all. Somebody who changed their password because they believed it had been
+   * seen came away thinking the old one was dead and other sessions were cut.
+   * Neither was true, and the screen was the only thing telling them otherwise.
+   *
+   * The toast now reports what the server actually did, including the number of
+   * sessions it revoked, because that sentence is the reason somebody uses this
+   * form during an incident.
+   */
+  const change = useMutation({
+    mutationFn: (input: { currentPassword: string; newPassword: string }) =>
+      api.post<{ otherSessionsRevoked: number }>('/auth/change-password', input),
+    onSuccess: (result) => {
+      setCurrent('');
+      setNext('');
+      setConfirm('');
+      toast.success(
+        'Password changed',
+        result.otherSessionsRevoked > 0
+          ? `${result.otherSessionsRevoked} other ${
+              result.otherSessionsRevoked === 1 ? 'session was' : 'sessions were'
+            } signed out. Use the new password next time you sign in.`
+          : 'Use the new password next time you sign in.',
+      );
+    },
+    onError: (error) =>
+      /*
+       * The current-password failure is kept distinct from everything else. "That
+       * is not your current password" is actionable; a generic "could not change
+       * it" sends somebody looking for a server fault that is not there.
+       */
+      toast.error(
+        'Password not changed',
+        error instanceof ApiError
+          ? error.message
+          : 'Nothing was altered. Try again in a moment.',
+      ),
+  });
 
   return (
     <div className="flex flex-col gap-4">
@@ -125,18 +173,23 @@ export default function AccountSettingsPage() {
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              if (mismatch || tooShort) return;
-              toast.success('Password changed', 'Your other sessions have been signed out.');
-              setCurrent('');
-              setNext('');
-              setConfirm('');
+              if (mismatch || tooShort || unchanged) return;
+              change.mutate({ currentPassword: current, newPassword: next });
             }}
             className="flex max-w-sm flex-col gap-4"
           >
+            {/*
+              Said here as well as enforced on the server. Somebody changing a
+              password during an incident needs to know the old one stops
+              working everywhere, not just on this device.
+            */}
+            <Alert tone="info" title="This signs out your other devices">
+              Everywhere else you are signed in will need the new password. This
+              device stays signed in.
+            </Alert>
             <Field label="Current password" htmlFor="current" required>
-              <Input
+              <PasswordInput
                 id="current"
-                type="password"
                 autoComplete="current-password"
                 value={current}
                 onChange={(event) => setCurrent(event.target.value)}
@@ -147,11 +200,21 @@ export default function AccountSettingsPage() {
               htmlFor="next"
               required
               hint="At least 12 characters. A short phrase you can remember beats a complicated word."
-              error={tooShort ? 'Use at least 12 characters.' : undefined}
+              error={
+                tooShort
+                  ? 'Use at least 12 characters.'
+                  : unchanged
+                    ? 'That is the password you are already using.'
+                    : undefined
+              }
             >
-              <Input
+              {/*
+              The reveal earns the most here. "These do not match" between two
+              masked fields gives you no way to tell WHICH one has the typo, so
+              the only remedy is to clear both and start again.
+            */}
+              <PasswordInput
                 id="next"
-                type="password"
                 autoComplete="new-password"
                 value={next}
                 onChange={(event) => setNext(event.target.value)}
@@ -163,9 +226,8 @@ export default function AccountSettingsPage() {
               required
               error={mismatch ? 'These do not match.' : undefined}
             >
-              <Input
+              <PasswordInput
                 id="confirm"
-                type="password"
                 autoComplete="new-password"
                 value={confirm}
                 onChange={(event) => setConfirm(event.target.value)}
@@ -175,7 +237,10 @@ export default function AccountSettingsPage() {
               type="submit"
               variant="primary"
               className="w-fit"
-              disabled={!current || !next || mismatch || tooShort}
+              loading={change.isPending}
+              disabled={
+                !current || !next || !confirm || mismatch || tooShort || unchanged
+              }
             >
               Change password
             </Button>

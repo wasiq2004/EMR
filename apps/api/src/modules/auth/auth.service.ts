@@ -1,6 +1,7 @@
 import {
   ForbiddenException,
   Injectable,
+  InternalServerErrorException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { and, eq, isNull, sql } from 'drizzle-orm';
@@ -243,6 +244,133 @@ export class AuthService {
       found.row.ipAddress,
       found.row.userAgent,
     );
+  }
+
+  /**
+   * Changes the signed-in user's own password.
+   *
+   * WHY THIS DID NOT EXIST UNTIL NOW. The settings screen had the three fields,
+   * the validation and the success toast — and its submit handler called no API
+   * at all. It cleared the inputs and announced "Password changed. Your other
+   * sessions have been signed out." Nothing had happened. Somebody who changed
+   * their password because they thought it had been seen walked away believing
+   * the old one was dead and other sessions were cut; both were false, and the
+   * screen was the only thing that told them otherwise. That is the worst
+   * failure mode in the product: a security control that reports success
+   * without acting.
+   *
+   * THE CURRENT PASSWORD IS VERIFIED FIRST. A valid session is not sufficient
+   * authority to change the credential that session rests on — otherwise a
+   * reception terminal left unlocked for two minutes becomes permanent
+   * ownership of a clinician's account.
+   *
+   * THE UPDATE IS ROW-COUNTED. Every table here is under forced row-level
+   * security, so an UPDATE whose predicate falls outside the caller's clinic
+   * does not error — it reports zero rows affected and the caller cannot tell
+   * the difference from success. That exact shape has bitten this codebase
+   * before: sign-in, the clinic-status check and every audit write all silently
+   * affected nothing until the row counts were checked. A password change that
+   * silently did nothing would be indistinguishable from the mock it replaces.
+   *
+   * OTHER SESSIONS ARE REVOKED, because the screen says they are. Changing a
+   * password is what somebody does when they think it has been seen, and the
+   * whole point is to evict whoever else is holding one.
+   */
+  async changeOwnPassword(args: {
+    clinicId: string;
+    userId: string;
+    /** The caller's own access token id, so their current session survives. */
+    jti: string;
+    currentPassword: string;
+    newPassword: string;
+  }): Promise<{ otherSessionsRevoked: number }> {
+    const user = await this.tenantDb.runReadOnly(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(schema.appUser)
+        .where(eq(schema.appUser.id, args.userId))
+        .limit(1);
+      return row;
+    });
+
+    // Unreachable through the HTTP layer — the guard resolved this user from a
+    // verified token. Reaching it means the account was deleted mid-request.
+    if (!user) throw new UnauthorizedException('Please sign in again.');
+
+    const correct = await this.passwords.verify(user.passwordHash, args.currentPassword);
+    if (!correct) {
+      /*
+       * Counted against the lockout, exactly like a failed sign-in. Without
+       * this, the change-password form is an unthrottled oracle for guessing
+       * the current password of whatever account a session belongs to — the one
+       * place in the product where an attacker already has a session and only
+       * needs the password.
+       */
+      await this.recordFailedAttempt(user.id, user.clinicId, user.failedLoginAttempts);
+      await this.audit.append({
+        clinicId: user.clinicId,
+        actorUserId: user.id,
+        actorName: user.fullName,
+        actorRole: user.role,
+        actorType: 'USER',
+        action: 'PASSWORD_CHANGE_FAILED',
+        outcome: 'SERIOUS_FAILURE',
+        outcomeDescription: 'The current password did not match.',
+      });
+      throw new UnauthorizedException('That is not your current password.');
+    }
+
+    const hash = await this.passwords.hash(args.newPassword);
+
+    const revoked = await this.tenantDb.run(async (tx) => {
+      const changed = await tx
+        .update(schema.appUser)
+        .set({
+          passwordHash: hash,
+          /*
+           * Set to now, and this is the one place that is correct — the USER
+           * chose this password. An administrator issuing a temporary one
+           * writes null instead, so the two cases stay distinguishable.
+           */
+          passwordChangedAt: new Date(),
+          // A password they have just proven they know clears the lockout.
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+          updatedBy: args.userId,
+        })
+        .where(eq(schema.appUser.id, args.userId))
+        .returning({ id: schema.appUser.id });
+
+      // THE CHECK. See the note above: under forced RLS a zero-row update is
+      // silent, and silence here is the bug this method was written to fix.
+      if (changed.length !== 1) {
+        throw new InternalServerErrorException(
+          'The password was not changed. Nothing has been altered — try again.',
+        );
+      }
+
+      /*
+       * Every other refresh session for this user. The caller's own access
+       * token is left alone so they are not thrown out of the screen they are
+       * standing on, but their refresh chain goes too — so the session they
+       * keep expires naturally within the access-token TTL rather than being
+       * renewable for weeks on a credential that was just rotated.
+       */
+      const dead = await tx
+        .update(schema.refreshSession)
+        .set({ revokedAt: new Date(), revokedReason: 'PASSWORD_CHANGED' })
+        .where(
+          and(
+            eq(schema.refreshSession.userId, args.userId),
+            isNull(schema.refreshSession.revokedAt),
+          ),
+        )
+        .returning({ id: schema.refreshSession.id });
+
+      return dead.length;
+    });
+
+    return { otherSessionsRevoked: revoked };
   }
 
   async signOut(jti: string, refreshToken: string | undefined): Promise<void> {

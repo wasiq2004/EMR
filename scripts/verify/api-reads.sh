@@ -257,6 +257,124 @@ else
   echo "        (no documents in the fixture; skip)"
 fi
 
+echo "-- A PASSWORD CHANGE HAS TO REACH THE DATABASE --"
+#
+# This whole block exists because of one reported symptom: a password was
+# changed, the screen said so, and the new password did not work. Two separate
+# faults were behind it.
+#
+#   1. `settings/account` called NO API. Its submit handler cleared the fields
+#      and announced "Password changed. Your other sessions have been signed
+#      out." There was no POST /auth/change-password on the server at all.
+#   2. The administrator's reset DID write, but never checked how many rows it
+#      affected. Under forced RLS a misdirected UPDATE affects zero rows and
+#      returns normally — so the endpoint could hand back a password it had
+#      stored nowhere.
+#
+# So every assertion here ends the same way: SIGN IN WITH IT. A 200 from the
+# change endpoint proves nothing; the only proof is that the old password stops
+# working and the new one starts.
+
+# A throwaway account, so nothing below can lock out a fixture everything else
+# in the suite depends on.
+login owner@$VERIFY_DOMAIN
+PWMAIL="pwcheck.$RANDOM$RANDOM@$VERIFY_DOMAIN"
+req POST /users "{\"fullName\":\"Password Path Check\",\"email\":\"$PWMAIL\",\"role\":\"RECEPTIONIST\"}"
+check "create a throwaway account" 201 "$CODE" "$BODY"
+PWUSER=$(printf '%s' "$BODY" | grep -o '"id":"[0-9a-f-]\{36\}"' | head -1 | cut -d'"' -f4)
+ISSUED=$(printf '%s' "$BODY" | grep -o '"temporaryPassword":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+# The invite must return a password, and it must be the one that works.
+[ -n "$ISSUED" ] \
+  && check "the invite returns a one-time password" y y \
+  || check "the invite returns a one-time password" y n "$BODY"
+
+rm -f "$J"
+req POST /auth/login "{\"email\":\"$PWMAIL\",\"password\":\"$ISSUED\"}"
+check "the issued password actually signs in" 201 "$CODE" "$BODY"
+
+echo "-- changing your own password --"
+# Still signed in as the throwaway account from the login above.
+req POST /auth/change-password '{"currentPassword":"wrong-current-password","newPassword":"a-perfectly-fine-new-one"}'
+check "a wrong current password is refused" 401 "$CODE" "$BODY"
+
+req POST /auth/change-password "{\"currentPassword\":\"$ISSUED\",\"newPassword\":\"short\"}"
+check "a new password under 12 characters is refused" 422 "$CODE" "$BODY"
+
+req POST /auth/change-password "{\"currentPassword\":\"$ISSUED\",\"newPassword\":\"$ISSUED\"}"
+check "reusing the current password is refused" 422 "$CODE" "$BODY"
+
+CHOSEN="chosen-by-the-user-$RANDOM"
+req POST /auth/change-password "{\"currentPassword\":\"$ISSUED\",\"newPassword\":\"$CHOSEN\"}"
+check "the password changes" 201 "$CODE" "$BODY"
+printf '%s' "$BODY" | grep -q 'otherSessionsRevoked' \
+  && check "and it reports how many sessions it signed out" y y \
+  || check "and it reports how many sessions it signed out" y n "$BODY"
+
+# THE ASSERTION THAT MATTERS. Everything above could pass against the mock.
+rm -f "$J"
+req POST /auth/login "{\"email\":\"$PWMAIL\",\"password\":\"$CHOSEN\"}"
+check "THE NEW PASSWORD SIGNS IN" 201 "$CODE" "$BODY"
+
+rm -f "$J"
+req POST /auth/login "{\"email\":\"$PWMAIL\",\"password\":\"$ISSUED\"}"
+check "and the old one no longer does" 401 "$CODE" "$BODY"
+
+echo "-- an administrator issuing a new password --"
+login owner@$VERIFY_DOMAIN
+req POST "/users/$PWUSER/reset-password" '{}'
+check "the administrator can issue one" 201 "$CODE" "$BODY"
+RESET=$(printf '%s' "$BODY" | grep -o '"temporaryPassword":"[^"]*"' | head -1 | cut -d'"' -f4)
+[ -n "$RESET" ] \
+  && check "and it comes back in the response" y y \
+  || check "and it comes back in the response" y n "$BODY"
+# Not the same string twice: a reset that returned a constant would pass every
+# other assertion here.
+[ "$RESET" != "$CHOSEN" ] \
+  && check "it is a different password from the old one" y y \
+  || check "it is a different password from the old one" y n
+
+rm -f "$J"
+req POST /auth/login "{\"email\":\"$PWMAIL\",\"password\":\"$RESET\"}"
+check "THE ISSUED PASSWORD SIGNS IN" 201 "$CODE" "$BODY"
+
+rm -f "$J"
+req POST /auth/login "{\"email\":\"$PWMAIL\",\"password\":\"$CHOSEN\"}"
+check "and the one it replaced does not" 401 "$CODE" "$BODY"
+
+# A reset for somebody who is not there must not report success with a password
+# it stored nowhere. This is the row-count check.
+login owner@$VERIFY_DOMAIN
+req POST "/users/00000000-0000-0000-0000-000000000000/reset-password" '{}'
+check "a reset for a non-existent user is refused" 404 "$CODE" "$BODY"
+
+echo "-- who may change whose --"
+# Reception can change its OWN password and holds no user:update, so it cannot
+# reset anybody else's.
+login reception@$VERIFY_DOMAIN
+req POST "/users/$PWUSER/reset-password" '{}'
+check "reception cannot reset another account" 403 "$CODE" "$BODY"
+
+# But the change-password route is open to every authenticated role — including
+# the auditor, who holds almost no permissions at all. A role unable to change
+# its own password is an account nobody can secure.
+login auditor@$VERIFY_DOMAIN
+req POST /auth/change-password '{"currentPassword":"definitely-not-it","newPassword":"a-long-enough-password"}'
+check "the auditor reaches the change route (and is refused on the password)" 401 "$CODE" "$BODY"
+printf '%s' "$BODY" | grep -qi 'permission\|not allowed\|forbidden' \
+  && check "refused for the password, not for the permission" n y "$BODY" \
+  || check "refused for the password, not for the permission" n n
+
+# Signed out, nobody changes anything.
+rm -f "$J"
+req POST /auth/change-password '{"currentPassword":"x","newPassword":"a-long-enough-password"}'
+check "a signed-out caller cannot change a password" 401 "$CODE" "$BODY"
+
+echo "-- clean up the throwaway --"
+login owner@$VERIFY_DOMAIN
+req PATCH "/users/$PWUSER" '{"isActive":false}'
+check "the throwaway account is deactivated" 200 "$CODE" "$BODY"
+
 echo
 echo "  $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

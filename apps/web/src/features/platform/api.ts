@@ -133,7 +133,13 @@ export function useOnboardClinic() {
       contactEmail?: string | null;
       contactPhoneE164?: string | null;
     }) =>
-      api.post<{ clinicId: string; slug: string; temporaryPassword: string }>(
+      api.post<{
+        clinicId: string;
+        slug: string;
+        temporaryPassword: string;
+        /** False means no plan, so every optional module is off for this clinic. */
+        planAssigned: boolean;
+      }>(
         '/platform/tenants',
         input,
       ),

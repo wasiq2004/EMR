@@ -63,6 +63,8 @@ export function OnboardClinicDialog({
     email: string;
     password: string;
     slug: string;
+    /** False means the clinic has no plan, so every optional module is off. */
+    planAssigned: boolean;
   } | null>(null);
 
   const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
@@ -108,6 +110,23 @@ export function OnboardClinicDialog({
               password={issued.password}
               what="clinic administrator"
             />
+
+            {/*
+              Repeated AFTER creation, not just before it. The warning on the
+              form is easy to click past, and this is the last moment anybody
+              looks at this clinic before the staff do. A clinic onboarded
+              without a plan can open a patient record and nothing else — and
+              the first symptom its staff see is being told to contact their
+              administrator, who is the person reading this screen.
+            */}
+            {!issued.planAssigned ? (
+              <Alert tone="warning" title="This clinic has no plan yet">
+                Every optional module is off — billing, documents, WhatsApp,
+                pharmacy, lab and analytics. Assign a plan on the clinic&apos;s page
+                before handing these details over, or its staff will be told to
+                contact you.
+              </Alert>
+            ) : null}
 
             <DialogFooter>
               <Button variant="primary" onClick={() => onOpenChange(false)}>
@@ -277,6 +296,7 @@ export function OnboardClinicDialog({
                           email: form.adminEmail.trim(),
                           password: data.temporaryPassword,
                           slug: data.slug,
+                          planAssigned: data.planAssigned,
                         });
                         toast.success(`${form.name} created`);
                       },

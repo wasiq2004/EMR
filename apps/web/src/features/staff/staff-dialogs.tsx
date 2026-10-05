@@ -115,7 +115,17 @@ export function InviteStaffDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      {/*
+        `mandatory` ONCE A PASSWORD IS SHOWING, and only then.
+
+        It blocks the Escape key, an outside click and the corner close button.
+        While the form is open those are ordinary ways to change your mind, so
+        they stay. Once the password is on screen they are destructive: it is
+        argon2-hashed before the row is written and exists nowhere in plaintext,
+        so dismissing this dialog by accident loses the only copy and the account
+        needs another password issued. The way out is the Done button.
+      */}
+      <DialogContent size="lg" mandatory={issued !== null}>
         <DialogHeader>
           <DialogTitle>{issued ? 'Account created' : 'Add a staff member'}</DialogTitle>
         </DialogHeader>
@@ -124,7 +134,8 @@ export function InviteStaffDialog({
           <>
             <p className="text-sm text-ink-soft">
               <span className="font-semibold text-ink">{form.fullName}</span> can now sign
-              in as {ROLE_LABEL[form.role]}.
+              in as {ROLE_LABEL[form.role]}. Give them the password below before you
+              close this — it cannot be shown again.
             </p>
             <CredentialReveal
               email={form.email}
@@ -328,7 +339,7 @@ export function EditStaffDialog({
 
   return (
     <Dialog open={user !== null} onOpenChange={(open) => (open ? undefined : onClose())}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent size="lg">
         <DialogHeader>
           <DialogTitle>{user?.fullName}</DialogTitle>
         </DialogHeader>
@@ -495,7 +506,8 @@ export function ResetStaffPasswordDialog({
 
   return (
     <Dialog open={user !== null} onOpenChange={(open) => (open ? undefined : onClose())}>
-      <DialogContent>
+      {/* Undismissable once the password is showing — see the invite dialog. */}
+      <DialogContent mandatory={issued !== null}>
         <DialogHeader>
           <DialogTitle>Reset password for {user?.fullName}</DialogTitle>
         </DialogHeader>

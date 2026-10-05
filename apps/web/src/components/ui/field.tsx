@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import * as LabelPrimitive from '@radix-ui/react-label';
 import { cn } from '@/lib/cn';
 
@@ -39,6 +40,97 @@ const inputBase =
   'focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/25 ' +
   'disabled:cursor-not-allowed disabled:bg-surface-sunk disabled:text-ink-faint ' +
   'aria-[invalid=true]:border-critical aria-[invalid=true]:ring-critical/20';
+
+/**
+ * A password field with a reveal toggle.
+ *
+ * ONE COMPONENT FOR ALL SIX, for the same reason `CredentialReveal` is shared
+ * across the three flows that mint a credential: the handling rules are
+ * identical, and writing them out six times is how one of them ends up without
+ * the auto-hide or with a button that submits the form.
+ *
+ * WHY A REVEAL AT ALL. There is no self-service password reset in this product —
+ * no mail provider is connected — so a password is issued by an administrator
+ * and read out, or typed from something written down. That is exactly the
+ * situation where a typo is invisible and the only feedback is "email or
+ * password is incorrect", which does not say which. Worse, the issued passwords
+ * are base64url: they mix l/I/1 and O/0 and carry hyphens and underscores, so
+ * "I typed it right" and "I typed it wrong" feel the same.
+ *
+ * IT HIDES ITSELF AGAIN AFTER `revealSeconds`. A clinic reception terminal has
+ * patients standing at it, and the failure this guards is not someone reading
+ * over a shoulder during the two seconds it takes to check a password — it is
+ * the receptionist who reveals it, gets called away mid-sign-in, and leaves a
+ * credential in plaintext on a screen facing the waiting room. Twenty seconds
+ * is long enough that nobody checking their typing ever sees it expire, and
+ * short enough that walking away does not leave it up.
+ *
+ * `type="button"` IS LOAD-BEARING. A button inside a form defaults to submit, so
+ * without it the toggle would attempt a sign-in with a half-typed password,
+ * burn a failed-login attempt against the lockout counter, and re-render the
+ * form.
+ */
+export const PasswordInput = React.forwardRef<
+  HTMLInputElement,
+  // `type` is ours to control. Everything else — including the `id`,
+  // `aria-invalid` and `aria-describedby` that `Field` clones onto its child —
+  // is forwarded to the real input untouched.
+  Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> & {
+    /** Seconds before it re-hides itself. 0 disables the timer. */
+    revealSeconds?: number;
+  }
+>(({ className, revealSeconds = 20, disabled, ...props }, ref) => {
+  const [shown, setShown] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!shown || revealSeconds <= 0) return;
+    const timer = window.setTimeout(() => setShown(false), revealSeconds * 1000);
+    return () => window.clearTimeout(timer);
+  }, [shown, revealSeconds]);
+
+  return (
+    <div className="relative">
+      <input
+        ref={ref}
+        type={shown ? 'text' : 'password'}
+        disabled={disabled}
+        /*
+         * `pr-10` keeps the value clear of the button. Without it a long
+         * password runs underneath and the last characters — the ones most
+         * likely to be mistyped — are the ones you cannot see.
+         */
+        className={cn(inputBase, 'h-9 pr-10 text-sm', className)}
+        {...props}
+      />
+      <button
+        type="button"
+        /*
+         * Not aria-hidden and not tabIndex={-1}: somebody working the keyboard
+         * has the same reason to check what they typed as somebody with a mouse.
+         * It sits after the input in the tab order, which is where it belongs.
+         */
+        onClick={() => setShown((current) => !current)}
+        disabled={disabled}
+        aria-label={shown ? 'Hide password' : 'Show password'}
+        aria-pressed={shown}
+        title={shown ? 'Hide password' : 'Show password'}
+        className={cn(
+          'absolute inset-y-0 right-0 flex w-9 items-center justify-center rounded-r-md',
+          'text-ink-faint transition-colors hover:text-ink',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/25',
+          'disabled:cursor-not-allowed disabled:hover:text-ink-faint',
+        )}
+      >
+        {shown ? (
+          <EyeOff className="size-4" aria-hidden />
+        ) : (
+          <Eye className="size-4" aria-hidden />
+        )}
+      </button>
+    </div>
+  );
+});
+PasswordInput.displayName = 'PasswordInput';
 
 export const Input = React.forwardRef<
   HTMLInputElement,

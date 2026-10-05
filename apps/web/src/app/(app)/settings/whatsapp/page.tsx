@@ -23,7 +23,7 @@ import { formatDate, formatPhone } from '@/lib/format';
 import { useSession } from '@/lib/session';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Field, Input } from '@/components/ui/field';
+import { Field, Input, PasswordInput } from '@/components/ui/field';
 import { DataList, Panel, PanelBody, PanelHeader } from '@/components/ui/surface';
 import { Alert, EmptyState, Skeleton } from '@/components/ui/feedback';
 import { useToast } from '@/components/ui/toast';
@@ -485,14 +485,19 @@ function ConnectDialog({
             required
           >
             {/*
-              type=password so it is not read over a shoulder at a front desk,
-              and autoComplete=off so a browser never offers to save a
-              credential that belongs to the clinic rather than to the person.
+              Masked so it is not read over a shoulder at a front desk, and
+              autoComplete=off so a browser never offers to save a credential
+              that belongs to the clinic rather than to the person.
+
+              The reveal is here because this one is PASTED rather than typed —
+              a Meta token is a couple of hundred characters, and the way it
+              goes wrong is a truncated copy or a leading space, neither of
+              which is visible behind dots. The failure otherwise surfaces much
+              later as reminders that silently never send.
             */}
-            <Input
+            <PasswordInput
               id="wa-accessToken"
               {...form.register('accessToken')}
-              type="password"
               autoComplete="off"
               spellCheck={false}
             />

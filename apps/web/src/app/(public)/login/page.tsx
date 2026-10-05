@@ -8,7 +8,7 @@ import { Stethoscope } from 'lucide-react';
 import { LoginInput } from '@emr/contracts';
 import { ApiError, api } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
-import { Field, Input } from '@/components/ui/field';
+import { Field, Input, PasswordInput } from '@/components/ui/field';
 import { Alert } from '@/components/ui/feedback';
 
 
@@ -96,8 +96,15 @@ export default function LoginPage() {
             required
             error={form.formState.errors.password?.message}
           >
-            <Input
-              type="password"
+            {/*
+              Every clinical role signs in here — front desk, doctor, nurse,
+              pharmacist, analyst, clinic admin — so this one field is the
+              reveal that matters most. It is also where a password issued by an
+              administrator gets typed for the first time, from memory or off a
+              scrap of paper, and the only feedback on a typo is "email or
+              password is incorrect", which does not say which of the two.
+            */}
+            <PasswordInput
               autoComplete="current-password"
               {...form.register('password')}
             />

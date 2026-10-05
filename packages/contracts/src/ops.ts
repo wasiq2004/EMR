@@ -166,6 +166,37 @@ export const LoginInput = z.object({
 });
 export type LoginInput = z.infer<typeof LoginInput>;
 
+/**
+ * Changing your own password.
+ *
+ * THE CURRENT PASSWORD IS REQUIRED, and not as a formality. Without it, anyone
+ * who gets hold of a signed-in session — a shared reception terminal left
+ * unlocked, a borrowed laptop — converts temporary access into permanent
+ * ownership of a clinician's account, which is the account that signs
+ * prescriptions. Re-entering it is the only thing standing between those two.
+ *
+ * TWELVE CHARACTERS, matching what the screen has always promised. Deliberately
+ * no composition rules — no "one uppercase, one symbol" — because they push
+ * people toward `Password1!` and then toward writing it on the monitor. Length
+ * is the property that actually helps, and a short memorable phrase beats a
+ * mangled word.
+ */
+export const ChangePasswordInput = z
+  .object({
+    currentPassword: z.string().min(1, 'Enter your current password'),
+    newPassword: z
+      .string()
+      .min(12, 'Use at least 12 characters')
+      // Argon2 has no practical input limit, but an unbounded field is a way to
+      // make the server spend CPU hashing megabytes.
+      .max(200, 'That is longer than 200 characters'),
+  })
+  .refine((v) => v.newPassword !== v.currentPassword, {
+    message: 'The new password is the same as the current one',
+    path: ['newPassword'],
+  });
+export type ChangePasswordInput = z.infer<typeof ChangePasswordInput>;
+
 export const MfaInput = z.object({
   code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code'),
 });
