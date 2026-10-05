@@ -8,6 +8,7 @@ import type { ClinicalDocument } from '@emr/contracts';
 import { api } from '@/lib/api-client';
 import { qk } from '@/lib/query-client';
 import { ShareDocumentDialog } from '@/features/documents/share-dialog';
+import { UploadDocumentDialog } from '@/features/documents/upload-dialog';
 import { useCan } from '@/lib/session';
 import { formatBytes, formatDate } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
@@ -29,6 +30,7 @@ export default function PatientDocumentsPage() {
   const canUpload = useCan('document:create');
 
   const [sharing, setSharing] = React.useState<ClinicalDocument | null>(null);
+  const [uploading, setUploading] = React.useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: qk.patientDocuments(patientId),
@@ -48,7 +50,7 @@ export default function PatientDocumentsPage() {
           description={`${documents.length} on file`}
           actions={
             canUpload ? (
-              <Button size="sm" variant="secondary">
+              <Button size="sm" variant="secondary" onClick={() => setUploading(true)}>
                 <Upload aria-hidden />
                 Upload
               </Button>
@@ -61,7 +63,19 @@ export default function PatientDocumentsPage() {
           <EmptyState
             icon={FileText}
             title="No documents yet"
-            description="Prescriptions are added here automatically once signed."
+            description={
+              canUpload
+                ? 'Signed prescriptions arrive here on their own. Anything on paper — an outside lab report, a referral, a signed consent — has to be uploaded.'
+                : 'Prescriptions are added here automatically once signed.'
+            }
+            action={
+              canUpload ? (
+                <Button size="sm" variant="secondary" onClick={() => setUploading(true)}>
+                  <Upload aria-hidden />
+                  Upload a document
+                </Button>
+              ) : undefined
+            }
           />
         ) : (
           <ul className="divide-y divide-line-soft">
@@ -125,6 +139,12 @@ export default function PatientDocumentsPage() {
           </ul>
         )}
       </Panel>
+
+      <UploadDocumentDialog
+        patientId={patientId}
+        open={uploading}
+        onOpenChange={setUploading}
+      />
 
       {sharing ? (
         <ShareDocumentDialog

@@ -383,6 +383,26 @@ export class PurchasingService {
         );
       }
 
+      /*
+       * Already recorded is not an error, and must not be recorded again.
+       *
+       * A GOODS RECEIPT CREATES STOCK. Recording the same delivery twice puts
+       * medicine on the shelf that is not there, and the shortfall surfaces at
+       * the next count with no way to tell which receipt was the phantom. The
+       * partial unique index is what makes this safe under two concurrent
+       * requests; this lookup is what turns a constraint violation into a
+       * sensible answer for the one that lost.
+       */
+      const [already] = await tx
+        .select({
+          id: schema.goodsReceipt.id,
+          receiptNumber: schema.goodsReceipt.receiptNumber,
+        })
+        .from(schema.goodsReceipt)
+        .where(eq(schema.goodsReceipt.idempotencyKey, input.idempotencyKey))
+        .limit(1);
+      if (already) return { id: already.id, receiptNumber: already.receiptNumber };
+
       const receiptNumber = await nextNumber(
         tx,
         'GRN',
@@ -401,6 +421,7 @@ export class PurchasingService {
           supplierInvoiceDate: input.supplierInvoiceDate ?? null,
           receivedAt: new Date(),
           receivedBy: ctx.userId,
+          idempotencyKey: input.idempotencyKey,
           subtotalPaise: totals.subtotalPaise,
           taxPaise: totals.taxPaise,
           totalPaise: totals.totalPaise,

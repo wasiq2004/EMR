@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Search, Star } from 'lucide-react';
+import { AlertTriangle, Plus, Search, Star } from 'lucide-react';
 import type { Allergy, DrugCatalogueItem } from '@emr/contracts';
 import { api } from '@/lib/api-client';
 import { qk } from '@/lib/query-client';
@@ -34,10 +34,19 @@ export function DrugCombobox({
   allergies,
   onSelect,
   onFreeText,
+  onAddToCatalogue,
 }: {
   allergies: Allergy[];
   onSelect: (drug: DrugCatalogueItem) => void;
   onFreeText: (name: string) => void;
+  /**
+   * Opens the add-to-catalogue dialog, where the role allows it.
+   *
+   * Undefined for a doctor without `clinic:update` — prescribing an uncatalogued
+   * drug is clinical work anybody can do, but adding to the clinic's list
+   * changes what everybody is offered from then on, which is configuration.
+   */
+  onAddToCatalogue?: (typed: string) => void;
 }) {
   const [term, setTerm] = React.useState('');
   const [highlight, setHighlight] = React.useState(0);
@@ -106,24 +115,7 @@ export function DrugCombobox({
 
       {open ? (
         <div className="absolute z-40 mt-1 max-h-72 w-full overflow-y-auto scroll-thin rounded-md border border-line bg-surface-raised shadow-pop">
-          {results.length === 0 ? (
-            <button
-              type="button"
-              onMouseDown={(event) => {
-                event.preventDefault();
-                onFreeText(trimmed);
-                setTerm('');
-              }}
-              className="flex w-full items-center gap-2 px-3 py-2.5 text-left hover:bg-surface-sunk"
-            >
-              <span className="text-sm text-ink">
-                Prescribe &ldquo;{trimmed}&rdquo; as typed
-              </span>
-              <Badge tone="info" className="ml-auto">
-                Not in catalogue
-              </Badge>
-            </button>
-          ) : (
+          {
             <ul role="listbox" aria-label="Medicines">
               {results.map((drug, index) => {
                 const warnings = checkPrescription(
@@ -191,8 +183,64 @@ export function DrugCombobox({
                   </li>
                 );
               })}
+
+              {/*
+                BOTH fallbacks, and always present rather than only when the
+                search finds nothing.
+
+                They are different acts. "Prescribe as typed" writes this one
+                prescription and is what a doctor mid-consultation wants.
+                "Add to the clinic's list" keeps it, so the next doctor finds it
+                by searching and the allergy check has a molecule to reason
+                about — which needs a molecule typed in, and is therefore a
+                decision, not a keystroke. Showing them only on an empty result
+                set hid the second one entirely: a drug missing from the
+                catalogue almost always has near-matches.
+              */}
+              {trimmed.length >= 2 ? (
+                <li className={cn(results.length > 0 && 'border-t border-line-soft')}>
+                  <button
+                    type="button"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      onFreeText(trimmed);
+                      setTerm('');
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2.5 text-left hover:bg-surface-sunk"
+                  >
+                    <span className="text-sm text-ink">
+                      Prescribe &ldquo;{trimmed}&rdquo; as typed
+                    </span>
+                    <Badge tone="info" className="ml-auto">
+                      Just this once
+                    </Badge>
+                  </button>
+                </li>
+              ) : null}
+
+              {trimmed.length >= 2 && onAddToCatalogue ? (
+                <li className="border-t border-line-soft">
+                  <button
+                    type="button"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      onAddToCatalogue(trimmed);
+                      setTerm('');
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2.5 text-left hover:bg-surface-sunk"
+                  >
+                    <Plus className="size-3.5 shrink-0 text-accent" aria-hidden />
+                    <span className="text-sm text-ink">
+                      Add &ldquo;{trimmed}&rdquo; to the clinic&rsquo;s list
+                    </span>
+                    <Badge tone="neutral" className="ml-auto">
+                      Keeps it
+                    </Badge>
+                  </button>
+                </li>
+              ) : null}
             </ul>
-          )}
+          }
         </div>
       ) : null}
     </div>

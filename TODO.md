@@ -421,18 +421,36 @@ stubbed; the scheduler is cron calling an idempotent `POST /jobs/run-due`.
       as a doctor who stops working in February. The controller now refuses the
       range outright; the cap stays as a bound on the method itself.
 
-### Still open after Stage F
-- [ ] Six write endpoints are passed an `idempotencyKey` by the web client that
-      goes nowhere: `POST /appointments`, `/queue`, `/patients`,
-      `/pharmacy/lines/:id/fill`, `/pharmacy/receipts`, `/pharmacy/sales`. None
-      has the field in its contract or a column for it, so the client's key is
-      sent as a header the server ignores. They are not broken — they never
-      promised the guarantee at the contract level — but `/pharmacy/sales` takes
-      money and `/pharmacy/receipts` creates stock, so a double-tap there is a
-      real duplicate. The fix for each is the same shape as the payment one: the
-      field in the contract, a column, a partial unique index, `ON CONFLICT DO
-      NOTHING`. Deliberately not done silently as part of Stage F — it is six
-      migrations and six call sites, and worth its own pass.
+### Closed after Stage F
+- [x] All six of the endpoints passed an `idempotencyKey` that went nowhere are
+      resolved, and they did not all need the same answer — which was the point
+      of giving them their own pass rather than applying one pattern six times.
+
+      **Four got real keys.** `/pharmacy/receipts` and `/pharmacy/sales`
+      (migration `0015`) create stock and take money, so there the key is
+      REQUIRED: a request without protection is refused. `/appointments`,
+      `/queue` and `/patients` (migration `0016`) got the same mechanism with the
+      key OPTIONAL, because a duplicate appointment is a mess somebody cancels
+      and a duplicate patient is a record somebody merges — not money that moved.
+      An integration without a key is served, and is simply unprotected.
+
+      **One needed nothing.** `/pharmacy/lines/:id/fill` was flagged as the most
+      dangerous of the six and its own comment agreed. It is wrong: `fillLine`
+      calls `reverseExisting` FIRST, so it is a SET rather than an ADD and a
+      double-submit nets out correctly. The comment is corrected and the dead
+      header removed.
+
+      **`/appointments` and `/queue` share one key space**, deliberately — one
+      index over `(clinic_id, idempotency_key)` on `appointment`, so a key minted
+      for a booking cannot be reused to add a walk-in. Migration `0016` asserts
+      the index is not scoped by `is_walk_in`, which is the plausible-looking
+      change that would let the same key through twice.
+
+      Every call site now holds its key in a ref across attempts. That half
+      mattered as much as the server half: the keys were being minted inside
+      `mutationFn`, so a fresh value went out on every retry and the server would
+      have seen two distinct operations even once it started reading them. Two
+      failures stacked into the appearance of care.
 
 ## Stage B — The calendar
 - [x] B1. `GET /calendar` — appointments + derived free slots for a range.
@@ -774,11 +792,15 @@ stubbed; the scheduler is cron calling an idempotent `POST /jobs/run-due`.
       handler** — it looked like an export and did nothing. It now leads to the
       screen that actually exports.
 
-### Still open after Stage G
-- [ ] `appointment` has no `service_item_id`. The booking path accepts a service,
-      uses it for the duration and drops it, so appointment volume by service is
-      unanswerable and the analytics filter covers revenue only. One column plus
-      a migration, and the booking path already has the value in hand.
+### Closed after Stage G
+- [x] `appointment.service_item_id` exists (migration `0014`), the booking path
+      stores it, and the analytics service filter now covers appointment counts
+      as well as revenue. The screen says that appointments booked before the
+      column existed carry null and drop out of a filtered view — they are
+      genuinely uncategorised, and attributing them would be inventing history to
+      make a chart look complete. The FK is `SET NULL` and the migration asserts
+      it: cascading would delete every appointment ever booked under a service
+      the moment a clinic retired it from its price list.
 
 ## Stage H — Lab  (separate; do not bundle)
 - [x] H1. `lab_test_catalogue_item`, `lab_order`, `lab_result`, plus migration
@@ -856,11 +878,366 @@ stubbed; the scheduler is cron calling an idempotent `POST /jobs/run-due`.
       clinical content. Moved to a `CLINICAL_ROUTES` list used by the doctor,
       nurse and admin walks.
 
-## Carried over from the dead-control audit
-- [ ] Browser suite covers none of pharmacy / analytics / platform — 22 screens
-      with no automated render check
-- [ ] Three stub settings pages: Consent text, Consultation templates, Prescription sets
-- [ ] Document download: `/documents/:id/download`, `/share/:token/file` uncalled
-- [ ] `POST /share-links/:id/revoke` uncalled
-- [ ] `patients/merge` dead primary action
-- [ ] Broadcast test / cancel / recipients uncalled
+## Calendar rebuild and the drug catalogue, 2026-10-05
+
+Asked for: the calendar to look like Google Calendar, and whether manual drug
+entry exists.
+
+### The calendar
+- [x] **Overlapping appointments now sit side by side.** This was a defect, not a
+      style gap. Every block was `inset-x-1`, so two appointments at the same
+      time were drawn exactly on top of each other and the lower one was
+      invisible — for a clinic running a token system, four people told "after
+      ten", that hid the entire point of `capacity_per_slot`, and the page
+      rendered perfectly while doing it. Lanes are the standard interval-graph
+      colouring: sort by start with the longest first, accumulate clusters, and
+      give each appointment the first lane whose occupant has ended. Clusters are
+      independent, so two appointments at 09:00 do not narrow a lone 14:00 one.
+      11 unit tests in `lanes.test.ts`.
+- [x] **Week view is one column per DAY**, not per day-doctor pair. Three doctors
+      over a week was twenty-one columns, unreadable at any width — and nobody
+      scanning a week is choosing between doctors, they are looking for a day.
+      The day view keeps one column per doctor, which is what a front desk works
+      from. One `groupBy` prop, two honest answers.
+- [x] A **"now" line** — red, only on today. On a clinic calendar it answers more
+      than "what time is it": the gap between the line and the block being
+      consulted is the running delay.
+- [x] Mini-month sidebar for jumping further than the arrows reach. Paging a day
+      view eleven times to reach the end of the month is what makes people stop
+      using a calendar, and a date input cannot answer the question somebody
+      actually has — which day of the week the 14th is.
+- [x] Google Calendar's chrome where it earns its place: today's date in a
+      filled circle, the day's column tinted, half-hour rules lighter than the
+      hour, an hour gutter the labels cannot overlap, auto-scroll to the working
+      day on mount, and a hover `+` instead of a grid of permanent dashed boxes
+      competing with the appointments for attention.
+- [x] **Date ordering fixed.** The header read "19 – Oct 25" while every other
+      screen reads "25 Oct 2026", because the calendar used the default locale
+      and the rest of the product uses date-fns `d MMM yyyy`. Two orderings on
+      one page is how somebody misreads a date, which on a calendar means a
+      patient told the wrong day.
+
+### Manual drug entry
+- [x] **Prescribing one always worked** and still does: the combobox offers
+      "prescribe as typed" and the line stores a null `catalogueItemId`, with
+      "Typed manually — allergy checking matches on the name only" shown on it.
+- [x] **Keeping one did not exist, and D4 was marked complete anyway.** The
+      original D4 said "add to catalogue for a missing molecule"; the diagnosis
+      catalogue got `POST /diagnoses` and drugs never got the equivalent. That
+      was an error in this file, now corrected and built.
+
+      `POST /drugs` writes under the clinic's OWN tenant — migration `0013`
+      asserts no write policy on a shared catalogue admits the system tenant, so
+      one clinic cannot rename a drug for every clinic on the deployment. Adding
+      the same drug twice returns the existing row: two doctors reaching for the
+      same missing drug on the same morning is expected, not a conflict either
+      should have to resolve.
+
+      **The molecule is required and the dialog says why.** Safety is computed
+      from the molecule — the class map is what catches "Mox 500" for a
+      penicillin-allergic patient, since the brand contains no hint of
+      penicillin. A row with a brand and no molecule would search well and check
+      nothing, which is worse than being absent from the catalogue because a
+      doctor would reasonably assume a catalogued drug had been checked.
+
+      **Schedule stays null unless stated**, rather than defaulting to H like the
+      seeded list. Those were each checked; a clinic's own row has not been, and
+      Schedule X carries a telemedicine prohibition the server enforces — a wrong
+      value either blocks a legitimate prescription or waves through one the law
+      forbids.
+- [x] Both fallbacks now show **alongside matches**, not only on an empty result
+      set. They are different acts — "prescribe as typed" is this one
+      prescription, "add to the clinic's list" keeps it — and a drug missing from
+      the catalogue almost always has near-matches, so the old placement hid the
+      second one entirely.
+- [x] 9 new assertions in `consultation-flow.sh`: the role split, a molecule-less
+      row refused, idempotent re-adding, the clinic's own drug searchable and
+      prescribable, and the schedule stored null rather than guessed.
+
+## Where verification actually stands — 2026-10-05
+
+Stated precisely, because "it typechecks" and "it works" are different claims
+and conflating them is how a green build ships a broken register.
+
+**Run, and green:**
+- Typecheck, all four projects: `contracts`, `db`, `api`, `web` — clean.
+- `eslint` on `apps/api` and `apps/web` — clean.
+- 171 web unit tests, 6 files.
+- **32 NEW api unit tests, 2 files** — the first unit tests this service has
+  had. `apps/api` now carries vitest with a deliberately narrow brief: almost
+  everything here is only true against a real Postgres with RLS on, which is
+  what the shell suites are for and what a mocked database would quietly fail to
+  check. What belongs in a unit test is the logic that is wrong in ways a
+  database cannot reveal — text decoding, CSV grammar, date arithmetic. Those 32
+  cover exactly that, and every one of them is a case that fails SILENTLY in
+  production: the BOM, the CP1252 fallback, the quoted comma, 31 February,
+  DD/MM against MM/DD, the two-digit year.
+
+**Written, typechecked, and NOT YET RUN AGAINST A DATABASE:**
+- Migrations `0014`, `0015`, `0016` — unapplied. Their embedded assertions are
+  the point of them and have never executed.
+- `scripts/verify/pharmacy.sh` — new, never run.
+- `scripts/verify/import.sh` — new, never run. ~60 assertions.
+- `scripts/verify/research.sh` — new, never run. ~60 assertions.
+- `scripts/verify/api-reads.sh` — the consent, share-link-revoke and document
+  upload blocks are new and never run.
+- `scripts/verify/availability.sh` — the idempotency block is new and never run.
+- `apps/web/e2e/smoke.spec.ts` — 4 new tests covering 25 previously unguarded
+  screens, never run.
+- `all.sh` now runs 11 suites: `api-reads availability consultation-flow
+  reminders analytics lab pharmacy import research broadcast platform`.
+
+Docker has deliberately not been started. The next step is to apply the three
+migrations and run the suites, and that needs confirmation before Docker comes
+up.
+
+## Dead controls, cleared 2026-10-05
+
+Re-audited rather than trusted: every claim on the old list was checked against
+the code before being acted on, and one turned out to be wrong in the dangerous
+direction — see `pharmacy/lines/:id/fill` below.
+
+- [x] **Consent could never be recorded or withdrawn.** The worst of them. The
+      table, the read endpoint and the screen all existed; there was no POST or
+      PATCH route anywhere, so the only consents in any database were the ones
+      the verification fixtures inserted with raw SQL. That is not a tidiness
+      problem: the WhatsApp send path refuses a patient with no
+      `WHATSAPP_COMMUNICATION` consent, so **reminders and broadcasts were gated
+      on something the product offered no way to obtain.**
+
+      `POST /patients/:id/consents` and `POST /consents/:id/withdraw` now exist,
+      with the dialogs behind the two buttons that did nothing. Every field is a
+      DPDP requirement rather than bookkeeping, and none has a convenient default
+      that would let somebody record a consent nobody gave: the notice VERSION is
+      required, because "they consented" is not defensible without knowing which
+      notice applied; the LANGUAGE is required, because the Act gives the data
+      principal that choice and defaulting to English for a patient read the
+      notice in Tamil makes the record untrue in exactly the way the provision
+      exists to prevent.
+
+      Re-recording a purpose supersedes rather than duplicating — two live
+      consents for one purpose is a state nobody can act on. Withdrawal keeps the
+      row: a message sent last week was lawfully sent, and erasing the consent
+      would make it look otherwise in hindsight. No reason is required to
+      withdraw, because making a patient justify exercising a right to a
+      receptionist is a dark pattern.
+
+      Recording is `consent:create` (reception included — the person who shows
+      the notice is usually the person at the desk); withdrawing is
+      `consent:update`, which is narrower, because it stops messages reaching
+      that patient from the moment it lands.
+- [x] **Document download, both ends.** `GET /documents/:id/download` and
+      `GET /share/:token/file` had existed and audited since the module shipped,
+      and nothing called either. On the clinic side the primary action on a
+      document page was a `<Button>` with no `onClick`. On the public side a
+      patient opened a share link, received an OTP, typed it correctly — **and
+      met a button that did nothing.** Both are real links now; the share page
+      keeps the OTP that worked, because the resolver re-verifies on every
+      request rather than trusting that a previous call succeeded.
+- [x] **Share links could not be revoked**, while the dialog said "it can be
+      revoked at any time". The endpoint existed; the create response did not
+      return the link's id, so the screen had nothing to call it with. It does
+      now, and Revoke sits beside Copy — which is where it is needed, the moment
+      somebody realises they pasted the link into the wrong chat.
+- [x] **Broadcast cancel and test.** A broadcast to several hundred patients
+      could be started and not stopped. The dispatcher checks between batches, so
+      Stop takes effect within about a second — it cannot unsend what has gone,
+      and the toast says so. Test send is offered only while it is still a draft:
+      a WhatsApp template renders differently from how it reads in a form, and
+      sending to the whole audience to find out is not a rehearsal.
+- [x] **`patients/merge`** — the page's primary action did nothing while the
+      endpoint, contract and service were complete. Wired through a dialog rather
+      than straight to the button: a merge moves every encounter, prescription,
+      invoice and document onto another record and is not easily undone, so the
+      person pressing it sees both records and chooses which survives. The
+      direction is the decision — the longer history usually wins, but not when
+      the other has the correct spelling and a working phone number.
+- [x] **Three stub settings pages.** Each rendered an unconditional "nothing
+      here" with **no read path at all** — not one `api.get` — above a button
+      with no handler. A clinic with templates in the database was told it had
+      none. Consultation templates and prescription sets now read the endpoints
+      that have existed all along and say plainly that creating them has no API
+      yet. The consent-text page has no endpoint to read either, so it explains
+      what actually matters — the notice VERSION recorded against each consent —
+      instead of offering an upload button that cannot work.
+- [x] **Browser coverage for all 25 unguarded screens** — ten pharmacy, six
+      analytics, nine platform — across four new tests, including the operations
+      console under its own operator session and its login page without one. A
+      render check is not trivial here: every screen is gated on a session that
+      resolves client-side, so a page whose component throws still answers 200
+      with plausible markup. Only a real browser with console errors failing the
+      run can tell.
+- [x] **`appointment.service_item_id`.** The booking path accepted a service,
+      used it to compute the end time and threw it away. Stored now, with
+      migration `0014`; the analytics service filter applies to appointment
+      counts as well as revenue, and the screen says that appointments booked
+      before the column existed carry null and drop out — they are genuinely
+      uncategorised, and attributing them would be inventing history to make a
+      chart look complete. The FK is `SET NULL` and the migration asserts it:
+      cascading would delete every appointment ever booked under a service the
+      moment a clinic retired it from its price list.
+- [x] **Idempotency on the two endpoints that move money and stock.**
+      `POST /pharmacy/receipts` creates stock and `POST /pharmacy/sales` takes
+      money, and a retry did both twice — the client sent an `Idempotency-Key`
+      header nothing reads, and neither table had a column. Both now require the
+      key in the BODY, with partial unique indexes doing the enforcing (migration
+      `0015`) and the service returning the original row on a replay.
+      `scripts/verify/pharmacy.sh` — the first API coverage the pharmacy has ever
+      had — submits the identical receipt and the identical sale twice and
+      asserts the shelf does not move.
+- [x] **`POST /pharmacy/lines/:id/fill` needed nothing, and the comment claiming
+      otherwise was wrong.** The audit flagged it as the most dangerous of the
+      six, and its own code comment said a double-submit "would move stock twice,
+      and the second movement would be indistinguishable from a genuine
+      correction". Reading `fillLine`: it calls `reverseExisting` FIRST, returning
+      the line's previous quantity to stock, and only then issues the new amount.
+      It is a SET, not an ADD. A double-submit reverses and re-issues and the net
+      stock is right. The cost is two extra ledger rows — noise in an append-only
+      trail, not wrong stock. Comment corrected and the dead header removed; no
+      machinery added for a problem that does not exist.
+
+### Cleared in the second pass
+- [x] **Document upload now exists.** `POST /documents` was missing entirely, so
+      the Upload button was dead because there was nothing to call — a clinic
+      could not attach a scanned report, an outside lab result or a signed
+      consent form, which for a paper-heavy practice is most of a patient's file.
+      Less work than the note assumed: `DocumentsService.upload` was already
+      written, tenant-scoped and virus-scan-aware, and `StorageService.put`
+      already enforced the MIME allowlist and the size cap. Only the route was
+      absent.
+
+      **Multipart, not base64 JSON.** A 25 MB file is 34 MB of base64, over the
+      30 MB body limit, so the JSON route would have capped uploads near 22 MB
+      with a confusing error at the boundary and held both copies in memory. The
+      limits are declared on the Fastify plugin AS WELL AS in the storage
+      service, which is not redundant: the service checks a buffer it has already
+      been handed, so without the plugin limit a 2 GB upload is refused only
+      after being received in full. `file.truncated` is checked too — Fastify
+      truncates at the limit rather than throwing, and storing the short buffer
+      would mean a document that opens as a corrupt half-page, which nobody would
+      know was incomplete.
+
+      **`PATIENT_UPLOAD` is refused, and the restrictive-looking choice would
+      have been the broken one.** That type is held PENDING a virus scan, and
+      both `download` and the share-link resolver refuse anything PENDING —
+      correctly. But **nothing in this system ever sets `CLEAN`**: there is no
+      scanner. A file filed that way would upload successfully and then be
+      permanently unopenable, with no way to promote it. The gate is right and
+      stays; what is missing is the scanner, so the type is unreachable rather
+      than quietly accepted. This route is a member of staff attaching a file
+      from the clinic's own machine, which carries a null scan status — the
+      honest classification for a file the clinic produced itself.
+
+      The api client learned about `FormData` for this, which needed one
+      non-obvious thing: NO `Content-Type` header. Multipart needs a boundary
+      token in it, the browser generates one when it sees a FormData body, and
+      setting the type by hand produces a header with no boundary — which parses
+      as a request with no parts at all, and reads as "the file never arrived"
+      with nothing in it pointing at the header.
+- [x] **The import wizard is real.** This was the worst screen in the product. The
+      file was never uploaded or read; the column list it asked you to confirm was
+      a hardcoded array of seven names; the result figures — "1,284 rows read",
+      "1,207 ready", "54 possible duplicates", "23 problems" — were string
+      literals; and the button under them said "Import the 1,207 ready rows" and
+      had no handler. There was no `POST /imports` anywhere. A clinic admin would
+      have come away believing their register was in, found out at the front desk,
+      and had no idea which records to trust.
+
+      Built rather than removed, because a clinic arriving from another system
+      cannot start without it. Three steps, and the first two write nothing:
+      `POST /imports` stores the file and returns its REAL headings and first
+      three rows; `POST /imports/:id/validate` counts the rows against the actual
+      contract; `POST /imports/:id/commit` inserts them in ONE transaction.
+      `validate` and `commit` call the same `examine()`, so the preview cannot
+      describe something other than what happens.
+
+      **`import:execute` for the commit, `import:create` for the rest** — a
+      narrower permission for the one step that changes the register. Everything
+      before it is undone by closing the tab.
+
+      The awkward parts were not the parsing. They were what a real export from a
+      fifteen-year-old system contains, and each one fails SILENTLY:
+
+      * **A UTF-8 BOM**, which Excel writes by default. Left in place it becomes
+        part of the first heading, so "Name" arrives as "\uFEFFName", matches
+        nothing, and every row is reported as missing a name.
+      * **CP1252 text**, which most older Indian clinic software exports. Decoded
+        as UTF-8 it does not throw — it substitutes U+FFFD where the accents
+        were, so a name is quietly corrupted. The decoder falls back by LOOKING
+        FOR replacement characters, and reports which encoding it used, because
+        the clinic is the only one who can confirm a name looks right. Node's
+        `latin1` is ISO-8859-1, not CP1252, and they differ exactly where Word's
+        curly apostrophes live — so 0x80–0x9F is mapped by hand.
+      * **DD/MM/YYYY, not MM/DD/YYYY.** 03/04/1990 is 3 April here and 4 March in
+        an American export. Read backwards it still produces a valid date, still
+        imports, and shifts a birthday by weeks — enough to change a paediatric
+        dose and enough to stop a date-of-birth duplicate match. A two-digit year
+        reads as the past, because a register holds no birthdays in the future.
+      * **Rows that are entirely empty**, which a spreadsheet saved with
+        formatting below the data writes by the hundred. Counted as rows they
+        would tell the clinic their file has four times as many patients as it
+        does, and report the difference as problems.
+      * **An unrecognised entry in a sex column** is REPORTED, not defaulted to
+        UNKNOWN. A record that reads as complete and is not is worse than one the
+        clinic was asked about.
+
+      **A SHARED MOBILE IS NOT A DUPLICATE**, and this is the rule most likely to
+      be "tightened" by somebody who has not worked a clinic desk. A family of
+      five on one handset is routine in this market; refusing four of them would
+      leave a clinic unable to import its own register. The row is imported and
+      flagged. Only an identical name on the same number, or the same name and
+      date of birth, is treated as one person — EXACT matches, not the trigram
+      similarity the front desk uses, because at the desk a human is looking at
+      two records and a fuzzy prompt is useful, and here nobody is looking.
+
+      Every imported record is tagged `imported`, permanently. The spelling, the
+      number and the age came from the old system and were verified by nobody
+      here; staff need to know that when the number does not ring. A stated age
+      also gets `ageRecordedAt` set to the import date — an old register holding
+      "34" says nothing about today without it, and a dose computed from a rotted
+      age is wrong by years.
+
+      **Excel workbooks are refused with an instruction** rather than parsed. The
+      old picker accepted `.xlsx`, which it could afford to because it never
+      opened the file; reading one means merged cells, multiple sheets and
+      formula results that are not the displayed values. Pretending to accept it
+      would mean reading a zip header as text and reporting every row as broken.
+
+      `StorageService.putImport` is separate from `put` on purpose: a CSV is
+      deliberately not on the document allowlist, because a spreadsheet handed to
+      a clinician runs whatever a formula cell says, and widening the allowlist
+      would also let somebody attach one to a patient's documents where a
+      share-link recipient could download it.
+- [x] **`POST /pharmacy/sales/:id/return` has a UI**, and it needed a read
+      endpoint first. A return line must name the `stockBatchId`, and nothing
+      returned one — the list gives totals and a line COUNT. That is why the
+      endpoint sat implemented, audited and unreachable. `GET /pharmacy/sales/:id`
+      now returns the lines with `returnableQuantity` computed server-side by the
+      same arithmetic `recordReturn` enforces.
+
+      The batch is not a detail a screen could guess: stock goes back on the
+      batch it came off, and a strip sold from a batch expiring next month must
+      return to THAT batch or the clinic dispenses it in March believing it has
+      until December. The batch number and expiry are on every row because the
+      person at the counter is holding the box. **The price is not editable** —
+      the contract would accept any figure and the original line price is the
+      only defensible one; refunding at today's price for goods bought at last
+      month's turns the till into a way to move money without an auditable
+      reason.
+- [x] **`GET /broadcasts/:id/recipients` has a UI**, and failures sort first. Not
+      a presentational nicety: a clinical broadcast is time-bound — closed
+      tomorrow, camp on Sunday — so the patients it did not reach are the only
+      ones anybody can still act on, and they are the minority of a long list.
+      The failure reason is shown verbatim, because "number not on WhatsApp" is a
+      phone call and "template was rejected" affects every recipient, and a
+      generic "failed" tells you neither.
+- [x] **`scripts/verify/research.sh`** (TODO G2) — 60-odd assertions on the one
+      claim the analytics module makes that matters more than all its features:
+      a Research Analyst cannot identify a patient. Asserted as an ABSENCE, which
+      is the kind of guarantee that erodes silently — somebody adds a convenient
+      lookup and nothing fails. Both halves are checked: no route takes a name, a
+      number or an MRN, and the role holds no `patient:read`. Plus the three
+      properties that make an extract safe to hand over — small cells suppressed
+      rather than zeroed, subject keys salted per cohort so two extracts cannot
+      be joined on them, and every export carrying the definition that produced
+      it.

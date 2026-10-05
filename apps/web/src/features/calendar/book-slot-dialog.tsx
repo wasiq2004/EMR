@@ -54,18 +54,19 @@ export function BookSlotDialog({
   const [reason, setReason] = React.useState('');
 
   /*
-   * One key per booking the user is making, not one per attempt — reset when the
-   * dialog opens on a different slot.
+   * ONE KEY PER BOOKING THE USER IS MAKING, not one per attempt. Reset when the
+   * dialog opens on a different slot, because that is a different booking.
    *
-   * HONEST NOTE ON WHAT THIS CURRENTLY BUYS: nothing yet. `BookAppointment` has
-   * no `idempotencyKey` field, so it is sent as an `Idempotency-Key` header and
-   * the server does not read it. It is NOT put in the body, because zod would
-   * strip it and the call would look protected while being exactly as
-   * duplicable as before — which is the trap the payment screen fell into.
+   * This is now wired through: `BookAppointment` carries `idempotencyKey` as a
+   * body field, `appointment.idempotency_key` has a partial unique index behind
+   * it, and `book()` returns the appointment a repeated submit already made.
+   * Previously the same value went out as an `Idempotency-Key` header that
+   * nothing on the server read.
    *
-   * The key is held stably anyway, so that wiring `/appointments` up properly
-   * (TODO, "Still open after Stage F") is a server change rather than a hunt
-   * through call sites for keys minted per attempt.
+   * Holding it in a ref rather than minting it in the submit handler is the part
+   * that is easy to get wrong: a key generated per attempt makes the server see
+   * two distinct operations and apply both, which is the exact failure the key
+   * exists to prevent.
    */
   const bookingKey = React.useRef(idempotencyKey());
   React.useEffect(() => {
@@ -100,19 +101,16 @@ export function BookSlotDialog({
     mutationFn: () => {
       if (!slot || !patient) throw new Error('No slot');
       const start = new Date(slot.startsAt);
-      return api.post(
-        '/appointments',
-        {
-          patientId: patient.id,
-          practitionerId: slot.practitionerId,
-          locationId: slot.locationId,
-          serviceItemId: serviceItemId || null,
-          scheduledStart: start.toISOString(),
-          scheduledEnd: new Date(start.getTime() + minutes * 60_000).toISOString(),
-          reasonText: reason.trim() || null,
-        },
-        { idempotencyKey: bookingKey.current },
-      );
+      return api.post('/appointments', {
+        patientId: patient.id,
+        practitionerId: slot.practitionerId,
+        locationId: slot.locationId,
+        serviceItemId: serviceItemId || null,
+        scheduledStart: start.toISOString(),
+        scheduledEnd: new Date(start.getTime() + minutes * 60_000).toISOString(),
+        reasonText: reason.trim() || null,
+        idempotencyKey: bookingKey.current,
+      });
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['calendar'] });

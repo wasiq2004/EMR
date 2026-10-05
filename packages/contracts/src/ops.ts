@@ -376,6 +376,97 @@ export const IMPORT_TARGET_FIELDS = [
   { field: 'abhaNumber', label: 'ABHA number', required: false, aliases: ['abha', 'health_id'] },
 ] as const;
 
+/**
+ * The ceiling on one import.
+ *
+ * Not a performance guess. Validation and the commit both run inside a single
+ * request, and a batch has to either land whole or not at all — so the limit is
+ * the number of rows that can be validated and inserted in one transaction
+ * without holding it open long enough to matter. A clinic with more than fifty
+ * thousand patients splits the file, which is tedious but honest; the
+ * alternative is a half-imported registry, which is the one outcome this whole
+ * module exists to prevent.
+ */
+export const IMPORT_MAX_ROWS = 50_000;
+
+/**
+ * What the file's columns mean.
+ *
+ * Keyed by the heading as it appears in the clinic's own file, pointing at a
+ * field in `IMPORT_TARGET_FIELDS`. An empty value means "do not import this
+ * column", which is a real answer rather than a missing one — old systems carry
+ * columns nobody has needed for years.
+ */
+export const ImportColumnMapping = z.record(z.string(), z.string());
+export type ImportColumnMapping = z.infer<typeof ImportColumnMapping>;
+
+export const ValidateImport = z.object({
+  columnMapping: ImportColumnMapping,
+});
+export type ValidateImport = z.infer<typeof ValidateImport>;
+
+/** One row that will not be imported, and why, in the clinic's own terms. */
+export const ImportRowProblem = z.object({
+  /** 1-based, counting the heading as row 1 — what a spreadsheet shows. */
+  rowNumber: z.number().int().positive(),
+  /** The name on the row, so it can be found in the file without the number. */
+  label: z.string(),
+  field: z.string().nullable(),
+  message: z.string(),
+  kind: z.enum(['INVALID', 'DUPLICATE_IN_FILE', 'ALREADY_REGISTERED']),
+});
+export type ImportRowProblem = z.infer<typeof ImportRowProblem>;
+
+export const ImportJobRow = z.object({
+  id: Uuid,
+  entityType: z.string(),
+  sourceFilename: z.string(),
+  status: z.enum([
+    'AWAITING_MAPPING',
+    'AWAITING_CONFIRMATION',
+    'COMMITTING',
+    'COMPLETED',
+    'FAILED',
+  ]),
+  totalRows: z.number().int(),
+  validRows: z.number().int(),
+  errorRows: z.number().int(),
+  duplicateRows: z.number().int(),
+  importedRows: z.number().int(),
+  columnMapping: ImportColumnMapping,
+  /** The headings found in the file, in the order they appear. */
+  columns: z.array(z.string()),
+  requestedByName: z.string().nullable(),
+  startedAt: IsoDateTime.nullable(),
+  completedAt: IsoDateTime.nullable(),
+  createdAt: IsoDateTime,
+});
+export type ImportJobRow = z.infer<typeof ImportJobRow>;
+
+/** What the upload step hands back: the real headings and the first few rows. */
+export const ImportUploadResult = z.object({
+  job: ImportJobRow,
+  /** Suggested mapping, from the headings. Always shown for confirmation. */
+  suggestedMapping: ImportColumnMapping,
+  /** The first few rows as they were read, so the mapping can be checked. */
+  sampleRows: z.array(z.record(z.string(), z.string())),
+  /**
+   * Set when the file was not valid UTF-8 and had to be decoded as Windows-1252.
+   * Surfaced rather than silently handled: it is the usual sign of an export
+   * from an old desktop system, and names are where it shows.
+   */
+  decodedAs: z.enum(['utf-8', 'windows-1252']),
+});
+export type ImportUploadResult = z.infer<typeof ImportUploadResult>;
+
+export const ImportValidationResult = z.object({
+  job: ImportJobRow,
+  /** Capped for display. The downloadable report has every one. */
+  problems: z.array(ImportRowProblem),
+  problemsTruncated: z.boolean(),
+});
+export type ImportValidationResult = z.infer<typeof ImportValidationResult>;
+
 export const ExportJob = z.object({
   id: Uuid,
   exportType: z.enum(['FULL_CLINIC', 'PATIENT_SUBSET', 'DATE_RANGE']),

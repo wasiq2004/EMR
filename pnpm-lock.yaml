@@ -29,6 +29,9 @@ importers:
       '@fastify/cookie':
         specifier: ^11.0.2
         version: 11.1.2
+      '@fastify/multipart':
+        specifier: ^10.1.2
+        version: 10.1.2
       '@nestjs/common':
         specifier: ^11.0.0
         version: 11.2.5(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -71,7 +74,7 @@ importers:
     devDependencies:
       '@nestjs/cli':
         specifier: ^11.0.0
-        version: 11.0.24(@types/node@24.13.4)
+        version: 11.0.24(@types/node@24.13.4)(lightningcss@1.32.0)
       '@types/node':
         specifier: ^24.3.0
         version: 24.13.4
@@ -90,6 +93,9 @@ importers:
       typescript-eslint:
         specifier: ^8.70.1
         version: 8.70.1(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/node@24.13.4)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(tsx@4.23.15)
 
   apps/web:
     dependencies:
@@ -816,11 +822,17 @@ packages:
   '@fastify/ajv-compiler@4.0.6':
     resolution: {integrity: sha512-NtuzM0SfaMJbGlnjr9LWQUN5LzgSrbB8tf/wRZNas+4E1O/Nmzl53e7ruT61HDZyRCJGC6FxIogmNZO1c5ETBA==}
 
+  '@fastify/busboy@3.2.2':
+    resolution: {integrity: sha512-yXSS27qPExaXeuLvMRMXOLtpipzfQYNjG3FkunDWKGfMYjKuhFXko9CVzqxm8jcF+lmtS9Fd89QNdh9XDjnbNg==}
+
   '@fastify/cookie@11.1.2':
     resolution: {integrity: sha512-Dtrpk/YOGUsbRMvP/8ZqPpwnMRv0qSqodFdoQ2B589Obc7jw4s4Qla+cV72Bsm7WsZJnqlYFX/i7uSBq0xzg6g==}
 
   '@fastify/cors@11.3.0':
     resolution: {integrity: sha512-ggQGua+xHv1MvePbPr0v//xLYEsCXbWspquXCJS9Ot5YoRXq8J8ZWzHnxDBVnbtXosvistXo6LtNzOJswf64Fw==}
+
+  '@fastify/deepmerge@3.2.2':
+    resolution: {integrity: sha512-155eqA/WMQdN6gUD4RrhS2K0Pcz2Ou9pQ86L0sipOpP9ONbTA6oYw/hW4VdBjR4egcDHqmWUK9x80oUX7S1mDQ==}
 
   '@fastify/error@4.2.0':
     resolution: {integrity: sha512-RSo3sVDXfHskiBZKBPRgnQTtIqpi/7zhJOEmAxCiBcM7d0uwdGdxLlsCaLzGs8v8NnxIRlfG0N51p5yFaOentQ==}
@@ -839,6 +851,9 @@ packages:
 
   '@fastify/middie@9.3.4':
     resolution: {integrity: sha512-dd8phTnVWzx3iKPBKSvtRUT8+Igvy/MP+P5HcY2tjejEyeVbyjkD4HgzKessUObue5RRM5J6PZdxtAqgbn84yw==}
+
+  '@fastify/multipart@10.1.2':
+    resolution: {integrity: sha512-WHsqW5ffDXCbXXtdBQDryxu58fQvFPVGh4E4MlCO6hwCLNm0lYTCS6GKXUw2P64REDoECUNpMVvtMMstdIyBjQ==}
 
   '@fastify/proxy-addr@5.1.1':
     resolution: {integrity: sha512-zv07Y9GEuDsJPegZoDFd4SDWaZOW8N2pa0GSrYmKpId/tjt1Hgo3BjZBVjdVpfVrHaA+Qv5jawtS2O50J5xM9g==}
@@ -5227,6 +5242,8 @@ snapshots:
       ajv-formats: 3.0.1(ajv@8.20.0)
       fast-uri: 4.2.1
 
+  '@fastify/busboy@3.2.2': {}
+
   '@fastify/cookie@11.1.2':
     dependencies:
       cookie: 2.0.1
@@ -5236,6 +5253,8 @@ snapshots:
     dependencies:
       fastify-plugin: 6.0.0
       toad-cache: 3.7.4
+
+  '@fastify/deepmerge@3.2.2': {}
 
   '@fastify/error@4.2.0': {}
 
@@ -5261,6 +5280,14 @@ snapshots:
       find-my-way: 9.7.0
       path-to-regexp: 8.4.2
       reusify: 1.1.0
+
+  '@fastify/multipart@10.1.2':
+    dependencies:
+      '@fastify/busboy': 3.2.2
+      '@fastify/deepmerge': 3.2.2
+      '@fastify/error': 4.2.0
+      fastify-plugin: 6.0.0
+      secure-json-parse: 4.1.0
 
   '@fastify/proxy-addr@5.1.1':
     dependencies:
@@ -5591,7 +5618,7 @@ snapshots:
       '@tybys/wasm-util': 0.10.4
     optional: true
 
-  '@nestjs/cli@11.0.24(@types/node@24.13.4)':
+  '@nestjs/cli@11.0.24(@types/node@24.13.4)(lightningcss@1.32.0)':
     dependencies:
       '@angular-devkit/core': 19.2.27(chokidar@4.0.3)
       '@angular-devkit/schematics': 19.2.27(chokidar@4.0.3)
@@ -5602,14 +5629,14 @@ snapshots:
       chokidar: 4.0.3
       cli-table3: 0.6.5
       commander: 4.1.1
-      fork-ts-checker-webpack-plugin: 9.1.0(typescript@5.9.3)(webpack@5.106.2)
+      fork-ts-checker-webpack-plugin: 9.1.0(typescript@5.9.3)(webpack@5.106.2(lightningcss@1.32.0))
       glob: 13.0.6
       node-emoji: 1.11.0
       ora: 5.4.1
       tsconfig-paths: 4.2.0
       tsconfig-paths-webpack-plugin: 4.2.0
       typescript: 5.9.3
-      webpack: 5.106.2
+      webpack: 5.106.2(lightningcss@1.32.0)
       webpack-node-externals: 3.0.0
     transitivePeerDependencies:
       - '@minify-html/node'
@@ -7793,7 +7820,7 @@ snapshots:
     dependencies:
       is-callable: 1.2.7
 
-  fork-ts-checker-webpack-plugin@9.1.0(typescript@5.9.3)(webpack@5.106.2):
+  fork-ts-checker-webpack-plugin@9.1.0(typescript@5.9.3)(webpack@5.106.2(lightningcss@1.32.0)):
     dependencies:
       '@babel/code-frame': 7.29.7
       chalk: 4.1.2
@@ -7808,7 +7835,7 @@ snapshots:
       semver: 7.8.5
       tapable: 2.3.3
       typescript: 5.9.3
-      webpack: 5.106.2
+      webpack: 5.106.2(lightningcss@1.32.0)
 
   fs-extra@10.1.0:
     dependencies:
@@ -8997,13 +9024,15 @@ snapshots:
 
   tapable@2.3.3: {}
 
-  terser-webpack-plugin@5.6.1(webpack@5.106.2):
+  terser-webpack-plugin@5.6.1(lightningcss@1.32.0)(webpack@5.106.2(lightningcss@1.32.0)):
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       jest-worker: 27.5.1
       schema-utils: 4.5.0
       terser: 5.51.2
-      webpack: 5.106.2
+      webpack: 5.106.2(lightningcss@1.32.0)
+    optionalDependencies:
+      lightningcss: 1.32.0
 
   terser@5.51.2:
     dependencies:
@@ -9286,7 +9315,7 @@ snapshots:
 
   webpack-sources@3.5.1: {}
 
-  webpack@5.106.2:
+  webpack@5.106.2(lightningcss@1.32.0):
     dependencies:
       '@types/eslint-scope': 3.7.7
       '@types/estree': 1.0.9
@@ -9309,7 +9338,7 @@ snapshots:
       neo-async: 2.6.2
       schema-utils: 4.5.0
       tapable: 2.3.3
-      terser-webpack-plugin: 5.6.1(webpack@5.106.2)
+      terser-webpack-plugin: 5.6.1(lightningcss@1.32.0)(webpack@5.106.2(lightningcss@1.32.0))
       watchpack: 2.5.2
       webpack-sources: 3.5.1
     transitivePeerDependencies:

@@ -50,9 +50,32 @@ export default function DocumentPage() {
         }
         actions={
           <>
-            <Button variant="secondary" disabled={blocked}>
-              <Download aria-hidden />
-              Download
+            {/*
+              A real link, not a button with no handler.
+
+              `GET /documents/:id/download` streams the file and sets its own
+              `Content-Type` — and it has existed, audited as
+              DOCUMENT_DOWNLOADED, since the module shipped. Nothing ever called
+              it: this was a `<Button>` with no `onClick`, so the primary action
+              on a document page did nothing at all.
+
+              An anchor rather than a fetch-and-Blob, so the browser handles the
+              filename, the progress and the viewer. `blocked` disables it while
+              a virus scan is pending or has failed, which is the one case where
+              the file must not be handed over.
+            */}
+            <Button variant="secondary" disabled={blocked} asChild={!blocked}>
+              {blocked ? (
+                <span>
+                  <Download aria-hidden />
+                  Download
+                </span>
+              ) : (
+                <a href={`/api/documents/${params.id}/download`} download={data.title}>
+                  <Download aria-hidden />
+                  Download
+                </a>
+              )}
             </Button>
             {canShare ? (
               <Button variant="primary" disabled={blocked} onClick={() => setSharing(true)}>

@@ -114,6 +114,18 @@ const RegisterPatientBase = z
     searchToken: z.string().min(1),
     /** Required when the receptionist dismisses a likely-duplicate warning. */
     duplicateOverrideReason: z.string().nullable().default(null),
+
+    /**
+     * One value per registration attempt, held across retries.
+     *
+     * A BODY FIELD, not a header. The web client has always passed an
+     * `Idempotency-Key` header here and nothing on the server read it, so the
+     * protection existed only as an option name in `api-client.ts`. Optional
+     * rather than required: unlike a payment or a stock receipt, registering the
+     * same patient twice is a mess somebody can merge rather than money that
+     * moved — so an integration without a key is served rather than refused.
+     */
+    idempotencyKey: z.string().min(8).max(200).nullish(),
   });
 
 /** Age or date of birth — one of the two, never neither. */
@@ -131,6 +143,9 @@ export type RegisterPatient = z.infer<typeof RegisterPatient>;
 export const UpdatePatient = RegisterPatientBase.omit({
   searchToken: true,
   duplicateOverrideReason: true,
+  // An edit is not a registration. Carrying the key over would collide with the
+  // one that created the record.
+  idempotencyKey: true,
 })
   .partial()
   .extend({ version: z.number().int().min(1) });
@@ -194,3 +209,72 @@ export const Consent = z.object({
   withdrawnReason: z.string().nullable(),
 });
 export type Consent = z.infer<typeof Consent>;
+
+/**
+ * Recording that a patient consented.
+ *
+ * WHY THIS EXISTS AT ALL, stated plainly: it did not, until now. The schema, the
+ * read endpoint and the screen were all there, and consent could be displayed —
+ * but nothing in the product could write one. The only consents in any database
+ * were the ones the verification fixtures inserted with raw SQL. A clinic
+ * running this could not record a consent, which matters beyond tidiness: the
+ * WhatsApp send path refuses a patient with no `WHATSAPP_COMMUNICATION` consent,
+ * so reminders and broadcasts were gated on a thing the product offered no way
+ * to obtain.
+ *
+ * EVERY FIELD HERE IS A DPDP REQUIREMENT, not bookkeeping. The Act requires that
+ * a data principal was shown a specific notice, in a language they chose, and
+ * that the manner of capture is recorded — which is why none of these have
+ * convenient defaults that would let a clinic record a consent nobody actually
+ * gave.
+ */
+export const RecordConsent = z.object({
+  scope: ConsentScope,
+  /**
+   * Which version of the notice the patient was shown.
+   *
+   * Required, because "they consented" is not a defensible record without it: a
+   * consent given against last year's notice does not cover a purpose added
+   * since, and without the version nobody can tell which notice applied.
+   */
+  policyVersion: z.string().trim().min(1, 'Which version of the notice did they see?'),
+  captureMethod: z.enum(['IN_PERSON_SIGNED', 'VERBAL_RECORDED', 'DIGITAL_OTP']),
+  /**
+   * The language the notice was presented in.
+   *
+   * DPDP gives the data principal the choice of language, so recording English
+   * by default for a patient who was read the notice in Tamil would make the
+   * record untrue in exactly the way the provision exists to prevent.
+   */
+  presentedLanguage: z.string().trim().min(2).default('en'),
+  /** Null is open-ended. ABDM linkage consents are always time-bounded. */
+  expiresAt: IsoDateTime.nullish(),
+  /** Object key of a signed paper form, where one was captured. */
+  evidenceObjectKey: z.string().trim().nullish(),
+});
+export type RecordConsent = z.infer<typeof RecordConsent>;
+
+/**
+ * Withdrawing a consent.
+ *
+ * A WITHDRAWAL IS NOT A DELETE. The row stays and gains `withdrawn_at`, because
+ * the clinic needs to be able to show both that consent was held and that it was
+ * withdrawn — and because a message sent last week was lawfully sent. Erasing
+ * the consent would make that send look unlawful in hindsight.
+ *
+ * It takes effect immediately everywhere, because every consumer checks at the
+ * point of use rather than caching: the reminder runner checks consent at SEND
+ * time precisely so that a withdrawal between scheduling and sending stops the
+ * message.
+ */
+export const WithdrawConsent = z.object({
+  /**
+   * Optional, deliberately.
+   *
+   * Requiring a reason to withdraw consent would be a dark pattern: a patient
+   * exercising a right under the Act should not have to justify it to a
+   * receptionist before the system will accept it.
+   */
+  reason: z.string().trim().max(500).nullish(),
+});
+export type WithdrawConsent = z.infer<typeof WithdrawConsent>;

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { Search, UserPlus } from 'lucide-react';
 import type { PatientSummary, Practitioner } from '@emr/contracts';
-import { api } from '@/lib/api-client';
+import { api, idempotencyKey } from '@/lib/api-client';
 import { qk } from '@/lib/query-client';
 import { useAddWalkIn } from './api';
 import { ageGender, formatPhone } from '@/lib/format';
@@ -49,6 +49,16 @@ export function AddWalkInDialog({
   const addWalkIn = useAddWalkIn();
   const toast = useToast();
 
+  /*
+   * ONE KEY PER WALK-IN, held across attempts and reset when the dialog opens.
+   *
+   * A key minted in the submit handler would be a fresh value on every press,
+   * so the server would see two distinct walk-ins and add both — which is the
+   * failure the key exists to prevent, dressed up as protection. A ref is what
+   * makes "the walk-in being added" distinct from "this attempt at adding it".
+   */
+  const walkInKey = React.useRef(idempotencyKey());
+
   const trimmed = term.trim();
   const { data: results } = useQuery({
     queryKey: qk.patients(trimmed),
@@ -75,6 +85,9 @@ export function AddWalkInDialog({
       setTerm('');
       setSelected(null);
       setReason('');
+      // A new key for the next walk-in. Reusing the last one would make the
+      // next patient's arrival look like a retry of the previous patient's.
+      walkInKey.current = idempotencyKey();
     } else if (doctors[0] && !practitionerId) {
       // Defaults to the only, or last used, doctor — one less decision.
       setPractitionerId(doctors[0].id);
@@ -87,6 +100,7 @@ export function AddWalkInDialog({
       patientId: selected.id,
       practitionerId: practitionerId || null,
       reasonText: reason.trim() || null,
+      idempotencyKey: walkInKey.current,
     });
     toast.success(
       `${selected.fullName} added to the queue`,

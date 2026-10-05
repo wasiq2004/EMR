@@ -8,7 +8,7 @@ import {
   type Appointment,
   type QueueEntry,
 } from '@emr/contracts';
-import { TenantDb } from '../../common/tenancy/tenant-db.service';
+import { TenantDb, type TenantTx } from '../../common/tenancy/tenant-db.service';
 import { TenantContext } from '../../common/tenancy/tenant-context';
 import { EventHub } from '../../common/events/event-hub.service';
 
@@ -129,10 +129,23 @@ export class SchedulingService {
     patientId: string;
     practitionerId?: string | null;
     reasonText?: string | null;
+    idempotencyKey?: string | null;
   }): Promise<Appointment> {
     const ctx = TenantContext.require();
 
     return this.tenantDb.run(async (tx) => {
+      /*
+       * A retried tap returns the walk-in it already made.
+       *
+       * The lookup is inside the transaction, and the partial unique index is
+       * what makes it safe: two concurrent requests with the same key both miss
+       * here, and the index fails one of them. This turns the common case — a
+       * retry seconds later — into the right answer rather than a constraint
+       * error the receptionist has to interpret with a patient in front of them.
+       */
+      const existing = await findByKey(tx, input.idempotencyKey);
+      if (existing) return existing;
+
       const positions = await tx.execute<{ max: string }>(sql`
         SELECT coalesce(max(queue_position), 0) AS max FROM appointment
         WHERE status IN ('ARRIVED','IN_PROGRESS')
@@ -153,6 +166,7 @@ export class SchedulingService {
           queuePosition: highest + 10,
           isWalkIn: true,
           reasonText: input.reasonText ?? null,
+          idempotencyKey: input.idempotencyKey ?? null,
           createdBy: ctx.userId,
           updatedBy: ctx.userId,
         })
@@ -180,6 +194,10 @@ export class SchedulingService {
     const ctx = TenantContext.require();
 
     return this.tenantDb.run(async (tx) => {
+      // The same booking twice is the same booking. See `addWalkIn`.
+      const existing = await findByKey(tx, input.idempotencyKey as string | null | undefined);
+      if (existing) return existing;
+
       let end = input.scheduledEnd ? new Date(String(input.scheduledEnd)) : null;
 
       // The chosen service sets the slot length, so a new consultation books a
@@ -205,6 +223,16 @@ export class SchedulingService {
           patientId: String(input.patientId),
           practitionerId: (input.practitionerId as string) ?? null,
           locationId: (input.locationId as string) ?? null,
+          /*
+           * STORED, not just used and discarded.
+           *
+           * This value was already in hand — it is what the duration lookup
+           * above reads — and the row had nowhere to put it, so "which service
+           * was this appointment for" was unanswerable and the analytics service
+           * filter had to say "narrows revenue only". Now it is kept.
+           */
+          serviceItemId: (input.serviceItemId as string) ?? null,
+          idempotencyKey: (input.idempotencyKey as string) ?? null,
           status: 'SCHEDULED',
           scheduledStart: new Date(String(input.scheduledStart)),
           scheduledEnd: end,
@@ -628,6 +656,33 @@ function endOfToday() {
   const d = new Date();
   d.setHours(23, 59, 59, 999);
   return d;
+}
+
+/**
+ * The appointment a repeated attempt already created, if there is one.
+ *
+ * Shared by `book` and `addWalkIn` because they write the same table and a key
+ * minted for one must not be reusable by the other — a single index over
+ * (clinic_id, idempotency_key) gives exactly that, and one lookup keeps the two
+ * paths from drifting.
+ *
+ * Returns undefined when there is no key, which is the no-protection case. That
+ * is deliberate rather than an oversight: a client without a key is served, and
+ * is simply not protected from its own retries.
+ */
+async function findByKey(
+  tx: TenantTx,
+  idempotencyKey: string | null | undefined,
+): Promise<Appointment | undefined> {
+  if (!idempotencyKey) return undefined;
+
+  const [found] = await tx
+    .select()
+    .from(schema.appointment)
+    .where(eq(schema.appointment.idempotencyKey, idempotencyKey))
+    .limit(1);
+
+  return found ? serialiseAppointment(found) : undefined;
 }
 
 export function serialiseAppointment(

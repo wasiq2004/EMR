@@ -61,6 +61,21 @@ export const BookAppointment = z.object({
   scheduledEnd: IsoDateTime.nullable().default(null),
   reasonText: z.string().nullable().default(null),
   notes: z.string().nullable().default(null),
+
+  /**
+   * One value per attempt, held across retries.
+   *
+   * A BODY FIELD, not a header. The client has always passed an
+   * `Idempotency-Key` header here and nothing on the server read it, so a
+   * double-tap at a busy front desk booked the same patient twice — and until
+   * somebody noticed and cancelled one, the day looked fuller than it was and
+   * the doctor was double-booked.
+   *
+   * Optional rather than required, unlike a payment or a stock receipt: a
+   * duplicate appointment is a mess somebody can cancel, not money that moved,
+   * so an integration without a key is served rather than refused.
+   */
+  idempotencyKey: z.string().min(8).max(200).nullish(),
 });
 export type BookAppointment = z.infer<typeof BookAppointment>;
 
@@ -69,6 +84,21 @@ export const AddToQueue = z.object({
   patientId: Uuid,
   practitionerId: Uuid.nullable(),
   reasonText: z.string().nullable().default(null),
+
+  /**
+   * One value per attempt, held across retries.
+   *
+   * A BODY FIELD, not a header. The client has always passed an
+   * `Idempotency-Key` header here and nothing on the server read it, so a
+   * double-tap at a busy front desk booked the same patient twice — and until
+   * somebody noticed and cancelled one, the day looked fuller than it was and
+   * the doctor was double-booked.
+   *
+   * Optional rather than required, unlike a payment or a stock receipt: a
+   * duplicate appointment is a mess somebody can cancel, not money that moved,
+   * so an integration without a key is served rather than refused.
+   */
+  idempotencyKey: z.string().min(8).max(200).nullish(),
 });
 export type AddToQueue = z.infer<typeof AddToQueue>;
 

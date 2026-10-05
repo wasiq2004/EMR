@@ -336,6 +336,22 @@ export const goodsReceipt = pgTable(
 
     notes: text('notes'),
 
+    /**
+     * The client's key for this one operation, so a retry cannot repeat it.
+     *
+     * A pharmacy counter is the worst place for an at-least-once write. The
+     * terminal gets tapped twice because the first tap did not visibly do
+     * anything, or the request times out and the assistant tries again with a
+     * patient waiting — and a duplicate looks exactly as real as the original.
+     * The same reasoning, and the same mechanism, as `payment.idempotency_key`
+     * in migration `0010`.
+     *
+     * Nullable, because rows written before this column existed have no key and
+     * inventing one would be a lie about what happened. The unique index is
+     * partial for the same reason.
+     */
+    idempotencyKey: text('idempotency_key'),
+
     ...auditColumns(),
   },
   (t) => [
@@ -350,6 +366,18 @@ export const goodsReceipt = pgTable(
     uniqueIndex('goods_receipt_clinic_number_uq').on(t.clinicId, t.receiptNumber),
     index('goods_receipt_clinic_supplier_idx').on(t.clinicId, t.supplierId, t.receivedAt.desc()),
     index('goods_receipt_clinic_order_idx').on(t.clinicId, t.purchaseOrderId),
+    /*
+     * One per key per clinic.
+     *
+     * A receipt CREATES STOCK. Recording the same delivery twice puts medicine on the shelf that is not there, and the shortfall is found at the next count with no way to tell which receipt was the phantom.
+     *
+     * The database enforces this, not the service: a check-then-insert in
+     * application code loses to two concurrent requests, which is precisely the
+     * double-tap this exists to stop.
+     */
+    uniqueIndex('goods_receipt_idempotency_uq')
+      .on(t.clinicId, t.idempotencyKey)
+      .where(sql`idempotency_key IS NOT NULL`),
     tenantPolicy('goods_receipt'),
   ],
 ).enableRLS();
@@ -768,6 +796,22 @@ export const pharmacySale = pgTable(
 
     cancelledReason: text('cancelled_reason'),
 
+    /**
+     * The client's key for this one operation, so a retry cannot repeat it.
+     *
+     * A pharmacy counter is the worst place for an at-least-once write. The
+     * terminal gets tapped twice because the first tap did not visibly do
+     * anything, or the request times out and the assistant tries again with a
+     * patient waiting — and a duplicate looks exactly as real as the original.
+     * The same reasoning, and the same mechanism, as `payment.idempotency_key`
+     * in migration `0010`.
+     *
+     * Nullable, because rows written before this column existed have no key and
+     * inventing one would be a lie about what happened. The unique index is
+     * partial for the same reason.
+     */
+    idempotencyKey: text('idempotency_key'),
+
     ...auditColumns(),
   },
   (t) => [
@@ -782,6 +826,18 @@ export const pharmacySale = pgTable(
     uniqueIndex('pharmacy_sale_clinic_number_uq').on(t.clinicId, t.saleNumber),
     index('pharmacy_sale_clinic_sold_idx').on(t.clinicId, t.soldAt.desc()),
     index('pharmacy_sale_clinic_patient_idx').on(t.clinicId, t.patientId),
+    /*
+     * One per key per clinic.
+     *
+     * A sale TAKES MONEY and removes stock. A duplicate charges the customer twice and understates the shelf, and reconciling it later means deciding which of two identical rows never happened.
+     *
+     * The database enforces this, not the service: a check-then-insert in
+     * application code loses to two concurrent requests, which is precisely the
+     * double-tap this exists to stop.
+     */
+    uniqueIndex('pharmacy_sale_idempotency_uq')
+      .on(t.clinicId, t.idempotencyKey)
+      .where(sql`idempotency_key IS NOT NULL`),
     tenantPolicy('pharmacy_sale'),
   ],
 ).enableRLS();

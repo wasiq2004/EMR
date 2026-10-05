@@ -57,22 +57,35 @@ export default function NewAppointmentPage() {
 
   const doctors = staff?.items ?? [];
 
+  /*
+   * ONE KEY PER BOOKING, held across attempts.
+   *
+   * It used to be `idempotencyKey()` inline in the call, which was wrong twice
+   * over: it went out as an `Idempotency-Key` HEADER that nothing on the server
+   * read, and it was a fresh value on every press — so even once the server
+   * started reading keys, a double-tap would have presented two distinct
+   * operations and booked the patient twice.
+   *
+   * Reset after a successful booking rather than on mount alone, because this
+   * page stays open: a receptionist books one patient, the form clears, and the
+   * next booking must not look like a retry of the last.
+   */
+  const bookingKey = React.useRef(idempotencyKey());
+
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!patient || !start) return;
     setSaving(true);
     try {
-      await api.post(
-        '/appointments',
-        {
-          patientId: patient.id,
-          practitionerId: practitionerId || null,
-          serviceItemId: serviceItemId || null,
-          scheduledStart: new Date(start).toISOString(),
-          reasonText: reason.trim() || null,
-        },
-        { idempotencyKey: idempotencyKey() },
-      );
+      await api.post('/appointments', {
+        patientId: patient.id,
+        practitionerId: practitionerId || null,
+        serviceItemId: serviceItemId || null,
+        scheduledStart: new Date(start).toISOString(),
+        reasonText: reason.trim() || null,
+        idempotencyKey: bookingKey.current,
+      });
+      bookingKey.current = idempotencyKey();
       toast.success('Appointment booked', `${patient.fullName} is on the calendar.`);
       router.push('/appointments');
     } catch {

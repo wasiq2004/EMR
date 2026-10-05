@@ -21,7 +21,7 @@ import { cn } from '@/lib/cn';
 import { useSession } from '@/lib/session';
 import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/field';
-import { Panel, PanelBody, PageHeader } from '@/components/ui/surface';
+import { Panel, PanelBody, PanelHeader, PageHeader } from '@/components/ui/surface';
 import { Alert, ErrorState, Skeleton } from '@/components/ui/feedback';
 import { useToast } from '@/components/ui/toast';
 import {
@@ -35,6 +35,7 @@ import {
   type CalendarFilters,
 } from '@/features/calendar/api';
 import { DayAnalyticsStrip } from '@/features/calendar/day-analytics';
+import { MiniMonth } from '@/features/calendar/mini-month';
 import { TimeGrid } from '@/features/calendar/time-grid';
 import { MonthGrid } from '@/features/calendar/month-grid';
 import { BookSlotDialog } from '@/features/calendar/book-slot-dialog';
@@ -360,7 +361,44 @@ export default function CalendarPage() {
         </Panel>
       ) : null}
 
-      {/* ---- The grid ---- */}
+      {/* ---- Sidebar and grid ---- */}
+      <div className="flex flex-col gap-4 lg:flex-row">
+        {/*
+          The mini-month, for jumping further than the arrows reach.
+
+          Paging a day view eleven times to get to the end of the month is what
+          makes people stop using a calendar, and a date input cannot answer the
+          question somebody actually has — which day of the week the 14th is,
+          when a patient says "next week, not Thursday".
+
+          Hidden on narrow screens: on a phone the grid needs the whole width,
+          and the arrows plus the view switcher are enough.
+        */}
+        <aside className="hidden w-52 shrink-0 flex-col gap-4 lg:flex">
+          <Panel>
+            <PanelBody className="p-3">
+              <MiniMonth selected={anchor} onSelect={(date) => setAnchor(date)} />
+            </PanelBody>
+          </Panel>
+
+          {/*
+            The day's numbers move here from above the grid.
+
+            On a day view they describe the day on screen; stacked in a narrow
+            column they read as a list rather than as a strip competing with the
+            grid for horizontal space.
+          */}
+          {data && data.days.length === 1 && data.days[0] ? (
+            <Panel>
+              <PanelHeader title="Today at a glance" />
+              <PanelBody className="p-3">
+                <DayAnalyticsStrip analytics={data.days[0].analytics} stacked />
+              </PanelBody>
+            </Panel>
+          ) : null}
+        </aside>
+
+        <div className="min-w-0 flex-1">
       {isError ? (
         <ErrorState
           title="Could not load the calendar"
@@ -384,15 +422,6 @@ export default function CalendarPage() {
         />
       ) : (
         <div className="flex flex-col gap-3">
-          {/*
-            The strip is per day, so it is shown only where there is one day to
-            describe. A week's worth of seven strips stacked above a grid is
-            noise; the month view carries its counts in the cells instead.
-          */}
-          {data.days.length === 1 && data.days[0] ? (
-            <DayAnalyticsStrip analytics={data.days[0].analytics} />
-          ) : null}
-
           {data.days.every((day) => day.columns.length === 0 && day.entries.length === 0) ? (
             <Alert tone="info" title="Nothing on the calendar yet">
               No doctor has working hours for{' '}
@@ -404,18 +433,28 @@ export default function CalendarPage() {
               and the free slots will appear here.
             </Alert>
           ) : (
-            <Panel className="overflow-hidden">
-              <TimeGrid
-                days={data.days}
-                isMoving={reschedule.isPending}
-                onBookSlot={(slot, date) => setBooking({ slot, date })}
-                onOpenEntry={(entry) => router.push(`/patients/${entry.patientId}`)}
-                onMoveEntry={onMove}
-              />
-            </Panel>
+            /*
+             * One column per DOCTOR on a day view, one per DAY otherwise.
+             *
+             * A week of three doctors as day-doctor pairs is twenty-one columns,
+             * which is unreadable at any screen width — and nobody scanning a
+             * week is choosing between doctors, they are looking for a day. The
+             * grid draws its own border, so no Panel around it.
+             */
+            <TimeGrid
+              days={data.days}
+              groupBy={view === 'day' ? 'practitioner' : 'day'}
+              isMoving={reschedule.isPending}
+              onBookSlot={(slot, date) => setBooking({ slot, date })}
+              onOpenEntry={(entry) => router.push(`/patients/${entry.patientId}`)}
+              onMoveEntry={onMove}
+            />
           )}
         </div>
       )}
+
+        </div>
+      </div>
 
       <BookSlotDialog
         slot={booking?.slot ?? null}
@@ -451,18 +490,28 @@ function parseDate(value: string | null): string | null {
 
 /** "Thu 2 Oct", "2–4 Oct", "29 Sep – 5 Oct", "October 2026". */
 function rangeLabel(view: CalendarView, anchor: string, from: string, to: string): string {
-  const locale = undefined;
+  /*
+   * `en-GB`, which is DAY FIRST — "25 Oct", not "Oct 25".
+   *
+   * Not a locale preference: the rest of this product formats dates with
+   * date-fns as `d MMM yyyy`, and the default locale here was producing
+   * month-first, so the calendar's own header read "19 – Oct 25" while every
+   * other screen read "25 Oct 2026". Two orderings on one page is the kind of
+   * thing that makes somebody misread a date, which on a clinic calendar means
+   * a patient told the wrong day.
+   */
+  const LOCALE = 'en-GB';
   const at = (iso: string) => new Date(`${iso}T12:00:00`);
 
   if (view === 'month') {
-    return at(startOfMonth(anchor)).toLocaleDateString(locale, {
+    return at(startOfMonth(anchor)).toLocaleDateString(LOCALE, {
       month: 'long',
       year: 'numeric',
     });
   }
 
   if (view === 'day') {
-    return at(from).toLocaleDateString(locale, {
+    return at(from).toLocaleDateString(LOCALE, {
       weekday: 'short',
       day: 'numeric',
       month: 'short',
@@ -473,8 +522,9 @@ function rangeLabel(view: CalendarView, anchor: string, from: string, to: string
   const last = new Date(at(to).getTime() - 86_400_000);
   const sameMonth = last.getMonth() === at(from).getMonth();
 
-  return `${at(from).toLocaleDateString(locale, {
+  // "19 – 25 Oct" within a month, "29 Sep – 5 Oct" across one.
+  return `${at(from).toLocaleDateString(LOCALE, {
     day: 'numeric',
     ...(sameMonth ? {} : { month: 'short' }),
-  })} – ${last.toLocaleDateString(locale, { day: 'numeric', month: 'short' })}`;
+  })} – ${last.toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}`;
 }

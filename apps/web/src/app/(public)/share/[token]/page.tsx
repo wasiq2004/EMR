@@ -28,6 +28,15 @@ import { Alert } from '@/components/ui/feedback';
 export default function SharedDocumentPage() {
   const params = useParams<{ token: string }>();
 
+  /*
+   * The OTP that worked, kept rather than cleared.
+   *
+   * `GET /share/:token/file` re-verifies it — the resolver is the only thing
+   * standing between a leaked link and somebody's medical record, so it checks
+   * on every request rather than trusting that a previous call succeeded. That
+   * means the download needs the same code the verify step used.
+   */
+  const [verifiedOtp, setVerifiedOtp] = React.useState<string | null>(null);
   const [state, setState] = React.useState<'loading' | 'otp' | 'ready' | 'denied'>(
     'loading',
   );
@@ -45,6 +54,7 @@ export default function SharedDocumentPage() {
         const result = await api.post<{ title: string }>(`/share/${params.token}`, {
           otp: otp ?? null,
         });
+        setVerifiedOtp(otp ?? null);
         setDocument(result);
         setState('ready');
       } catch (cause) {
@@ -147,9 +157,25 @@ export default function SharedDocumentPage() {
                 <FileText className="size-5 shrink-0 text-accent" aria-hidden />
                 <p className="text-sm font-medium text-ink">{document.title}</p>
               </div>
-              <Button variant="primary" size="lg">
-                <Download aria-hidden />
-                Download
+              {/*
+                The whole point of the page, and it did nothing.
+
+                A patient opened the link, received an OTP, typed it correctly —
+                and then met a button with no handler. `GET /share/:token/file`
+                has existed all along and takes the same OTP as a query
+                parameter, which is why it is kept in state after a successful
+                verify rather than cleared.
+              */}
+              <Button variant="primary" size="lg" asChild>
+                <a
+                  href={`/api/share/${params.token}/file${
+                    verifiedOtp ? `?otp=${encodeURIComponent(verifiedOtp)}` : ''
+                  }`}
+                  download={document.title}
+                >
+                  <Download aria-hidden />
+                  Download
+                </a>
               </Button>
               <p className="text-2xs text-ink-faint">
                 This link expires automatically. Please do not forward it — it

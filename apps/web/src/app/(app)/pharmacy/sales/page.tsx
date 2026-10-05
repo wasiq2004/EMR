@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Plus, ShoppingCart, Trash2 } from 'lucide-react';
+import { Plus, ShoppingCart, Trash2, Undo2 } from 'lucide-react';
 import { computeSaleTotals, type PaymentMethod } from '@emr/contracts';
 import {
   useDispenseQuote,
@@ -11,7 +11,8 @@ import {
   useSales,
   useStockBatches,
 } from '@/features/pharmacy/api';
-import { ApiError } from '@/lib/api-client';
+import { ReturnSaleDialog } from '@/features/pharmacy/return-dialog';
+import { ApiError, idempotencyKey } from '@/lib/api-client';
 import { formatDate, formatDateTime, formatPaise } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -40,6 +41,9 @@ export default function SalesPage() {
   const dispenseId = params.get('dispenseId');
 
   const sales = useSales();
+  // The id of the sale being returned against, which both opens the dialog and
+  // says which sale it is about.
+  const [returning, setReturning] = React.useState<string | null>(null);
   const today = (sales.data ?? []).filter(
     (s) => s.soldAt && s.soldAt.slice(0, 10) === new Date().toISOString().slice(0, 10),
   );
@@ -79,6 +83,7 @@ export default function SalesPage() {
                       <TH align="right">Lines</TH>
                       <TH>Paid by</TH>
                       <TH align="right">Total</TH>
+                      <TH />
                     </TR>
                   </THead>
                   <TBody>
@@ -119,6 +124,25 @@ export default function SalesPage() {
                         >
                           {formatPaise(sale.totalPaise)}
                         </TD>
+                        <TD align="right">
+                          {/*
+                            Not on a return document. `recordReturn` refuses to
+                            return against a return — the goods go back against
+                            the original sale, which is the only row that knows
+                            how much was sold — so offering the button here would
+                            be offering a guaranteed error.
+                          */}
+                          {sale.isReturn ? null : (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setReturning(sale.id)}
+                            >
+                              <Undo2 aria-hidden />
+                              Return
+                            </Button>
+                          )}
+                        </TD>
                       </TR>
                     ))}
                   </TBody>
@@ -128,6 +152,8 @@ export default function SalesPage() {
           </DataState>
         </PanelBody>
       </Panel>
+
+      <ReturnSaleDialog saleId={returning} onOpenChange={setReturning} />
     </div>
   );
 }
@@ -145,6 +171,15 @@ const METHODS: PaymentMethod[] = ['CASH', 'UPI', 'CARD', 'NETBANKING', 'CHEQUE',
 function NewSale({ dispenseId }: { dispenseId: string | null }) {
   const toast = useToast();
   const record = useRecordSale();
+
+  /*
+   * One key per sale the user is entering, not one per attempt.
+   *
+   * Held in a ref and replaced only after it lands. A key minted inside the
+   * mutation is new on every retry, so the server sees a second distinct
+   * sale and performs it — which is the exact failure the key prevents.
+   */
+  const submitKey = React.useRef(idempotencyKey());
   const products = useProducts();
   const batches = useStockBatches({});
   const quote = useDispenseQuote(dispenseId ?? '', Boolean(dispenseId));
@@ -345,11 +380,13 @@ function NewSale({ dispenseId }: { dispenseId: string | null }) {
                   })),
                   discountPaise: 0,
                   discountReason: null,
+                  idempotencyKey: submitKey.current,
                   paymentMethod: method,
                   paidPaise: totals.totalPaise,
                 },
                 {
                   onSuccess: () => {
+                    submitKey.current = idempotencyKey();
                     toast.success('Sale recorded');
                     if (!dispenseId) {
                       setLines([

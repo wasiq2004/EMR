@@ -78,6 +78,27 @@
       "when": 1790971813101,
       "tag": "0010_lab",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791188093438,
+      "tag": "0011_appointment_service",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791189050579,
+      "tag": "0012_pharmacy_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791190947929,
+      "tag": "0013_registration_idempotency",
+      "breakpoints": true
     }
   ]
 }

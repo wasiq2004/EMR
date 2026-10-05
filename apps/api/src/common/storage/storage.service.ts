@@ -16,6 +16,14 @@ const ALLOWED_UPLOAD_MIME = new Set([
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 /**
+ * Larger than a document, because it is text rather than a scan.
+ *
+ * 50,000 patient rows of name, number, date of birth and address is comfortably
+ * under 20 MB as CSV. The limit is here to stop a mistake, not to be reached.
+ */
+const MAX_IMPORT_BYTES = 40 * 1024 * 1024;
+
+/**
  * Object storage.
  *
  * The tenant prefix is structural, not cosmetic: every key begins
@@ -59,6 +67,43 @@ export class StorageService {
 
     // Recorded at write time. Any later dispute about what a document said is
     // resolvable against this.
+    return { sha256: createHash('sha256').update(body).digest('hex') };
+  }
+
+  /**
+   * Stores a CSV this system produced or is about to parse.
+   *
+   * SEPARATE FROM `put`, which exists for files a person attaches to a patient's
+   * record. That one enforces an allowlist of formats that can be virus-scanned
+   * and rendered in a browser, and a CSV is deliberately not on it: a
+   * spreadsheet handed to a clinician is a file that opens in Excel and runs
+   * whatever a formula cell says. Widening the allowlist to let an import
+   * through would also let somebody attach one to a patient's documents, where
+   * it would be offered to a share-link recipient for download.
+   *
+   * So the two paths carry different risk and get different rules. This one
+   * takes an import the clinic uploaded and the problem report written back to
+   * them — never anything served from a share link, never anything a patient
+   * supplied.
+   */
+  async putImport(objectKey: string, body: Buffer): Promise<{ sha256: string }> {
+    this.assertKeyBelongsToCurrentTenant(objectKey);
+
+    if (!objectKey.includes('/imports/')) {
+      // A caller reaching for this to store something that is not an import is
+      // reaching past the allowlist, which is the control it would be evading.
+      throw new ForbiddenException('That is not an import key.');
+    }
+    if (body.byteLength > MAX_IMPORT_BYTES) {
+      throw new ForbiddenException(
+        `That file is larger than the ${MAX_IMPORT_BYTES / 1024 / 1024} MB limit.`,
+      );
+    }
+
+    const target = path.join(config.STORAGE_LOCAL_PATH, objectKey);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, body);
+
     return { sha256: createHash('sha256').update(body).digest('hex') };
   }
 

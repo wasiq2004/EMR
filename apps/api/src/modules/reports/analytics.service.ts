@@ -339,14 +339,21 @@ export class AnalyticsService {
         WHERE a.scheduled_start >= ${from} AND a.scheduled_start < ${to}
           AND ${f.practitionerId ? sql`a.practitioner_id = ${f.practitionerId}` : sql`true`}
           AND ${f.locationId ? sql`a.location_id = ${f.locationId}` : sql`true`}
-          -- NO SERVICE FILTER: an appointment does not record a service.
-          -- BookAppointment accepts a serviceItemId and the booking path uses it
-          -- to work out the end time, then discards it: there is no column to
-          -- put it in. So "appointments for a service" is a question this schema
-          -- cannot answer, and the filter is deliberately not applied here
-          -- rather than applied wrongly. The service breakdown above comes from
-          -- invoice lines, which do record it. Fixing this properly means a
-          -- column on appointment plus a migration, recorded in TODO.md.
+          /*
+           * The service filter applies here now.
+           *
+           * appointment.service_item_id did not exist when this was written: the
+           * booking path used the chosen service to compute the end time and
+           * then discarded it, so "appointments for a service" was unanswerable
+           * and this filter was deliberately not applied rather than applied
+           * wrongly. The column exists now.
+           *
+           * Appointments booked BEFORE it exists carry null and drop out of a
+           * service-filtered count, which is correct. They are genuinely
+           * uncategorised, and attributing them to a service would be inventing
+           * history to make a chart look complete.
+           */
+          AND ${f.serviceItemId ? sql`a.service_item_id = ${f.serviceItemId}` : sql`true`}
       `)
     ).rows;
 

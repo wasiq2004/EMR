@@ -20,9 +20,18 @@ import { cn } from '@/lib/cn';
 export function DayAnalyticsStrip({
   analytics,
   className,
+  stacked = false,
 }: {
   analytics: DayAnalytics;
   className?: string;
+  /**
+   * One figure per line, for the sidebar.
+   *
+   * The horizontal strip competes with the grid for width; stacked in a narrow
+   * column the same figures read as a list. Same content either way — this is a
+   * layout switch, not a different set of numbers.
+   */
+  stacked?: boolean;
 }) {
   const figures: { label: string; value: number | null; tone?: string; always?: boolean }[] = [
     { label: 'Booked', value: analytics.booked, always: true },
@@ -41,24 +50,49 @@ export function DayAnalyticsStrip({
   return (
     <div
       className={cn(
-        'flex flex-wrap items-center gap-x-5 gap-y-2 rounded-md border border-line-soft ' +
-          'bg-surface-sunk px-3 py-2',
+        stacked
+          ? 'flex flex-col gap-1.5'
+          : 'flex flex-wrap items-center gap-x-5 gap-y-2 rounded-md border border-line-soft bg-surface-sunk px-3 py-2',
         className,
       )}
     >
       {shown.map((figure) => (
-        <div key={figure.label} className="flex items-baseline gap-1.5">
-          <span className={cn('text-sm font-semibold tabular', figure.tone ?? 'text-ink')}>
-            {figure.value ?? '—'}
-          </span>
-          <span className="text-2xs uppercase tracking-wide text-ink-faint">
-            {figure.label}
-          </span>
+        <div
+          key={figure.label}
+          className={cn(
+            'flex items-baseline gap-1.5',
+            stacked && 'justify-between',
+          )}
+        >
+          {stacked ? (
+            <>
+              <span className="text-2xs uppercase tracking-wide text-ink-faint">
+                {figure.label}
+              </span>
+              <span className={cn('text-sm font-semibold tabular', figure.tone ?? 'text-ink')}>
+                {figure.value ?? '—'}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className={cn('text-sm font-semibold tabular', figure.tone ?? 'text-ink')}>
+                {figure.value ?? '—'}
+              </span>
+              <span className="text-2xs uppercase tracking-wide text-ink-faint">
+                {figure.label}
+              </span>
+            </>
+          )}
         </div>
       ))}
 
       {analytics.utilisationPct !== null ? (
-        <div className="ml-auto flex items-center gap-2">
+        <div
+          className={cn(
+            'flex items-center gap-2',
+            stacked ? 'mt-1 border-t border-line-soft pt-2' : 'ml-auto',
+          )}
+        >
           <span className="text-2xs uppercase tracking-wide text-ink-faint">Utilisation</span>
           {/*
             A bar as well as a number, because "62%" means nothing without a

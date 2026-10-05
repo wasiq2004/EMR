@@ -422,6 +422,49 @@ export type DrugCatalogueItem = z.infer<typeof DrugCatalogueItem>;
  * about it. Persisted on the prescription: the clinic's evidence of safe
  * practice, and the product's evidence of having warned.
  */
+/**
+ * Adding a drug the shared catalogue does not have.
+ *
+ * Prescribing an uncatalogued drug has always worked — the combobox offers
+ * "prescribe as typed" and the line stores a null `catalogueItemId`. This is the
+ * separate act of keeping it, so the next doctor finds it by searching and the
+ * allergy check has a molecule to reason about.
+ *
+ * WHY `moleculeName` IS REQUIRED AND THE BRAND IS NOT. Safety is computed from
+ * the molecule: `drug-classes.ts` maps molecules to classes so that prescribing
+ * "Mox 500" to a penicillin-allergic patient is caught by the class, not by the
+ * brand name containing the word "penicillin". A catalogue row with a brand and
+ * no molecule would search well and check nothing — which is worse than not
+ * being in the catalogue at all, because the doctor would reasonably assume a
+ * catalogued drug had been checked.
+ *
+ * Written under the clinic's OWN tenant, never the shared one. Migration `0013`
+ * asserts that no write policy on any shared catalogue admits the system tenant.
+ */
+export const AddDrugToCatalogue = z.object({
+  /** As marketed, e.g. "Mox 500". Optional — a generic has no brand. */
+  brandName: z.string().trim().max(120).nullish(),
+  /**
+   * The molecule, required.
+   *
+   * A combination is written as the clinic writes it — "Amoxicillin + Clavulanic
+   * acid" — because that is what the allergy cross-check splits on and what a
+   * doctor reads back.
+   */
+  moleculeName: z.string().trim().min(2, 'Name the molecule, not just the brand'),
+  strength: z.string().trim().max(60).nullish(),
+  dosageForm: z.string().trim().max(60).nullish(),
+  route: z.string().trim().max(60).nullish(),
+  manufacturer: z.string().trim().max(120).nullish(),
+  /**
+   * H, H1 or X. Schedule X may not be prescribed by telemedicine, and the server
+   * enforces that — so getting this wrong on a clinic's own row would defeat a
+   * legal control. Left null when unknown rather than guessed at.
+   */
+  drugSchedule: z.enum(['H', 'H1', 'X']).nullish(),
+});
+export type AddDrugToCatalogue = z.infer<typeof AddDrugToCatalogue>;
+
 export const SafetyWarning = z.object({
   kind: z.enum([
     'ALLERGY_EXACT',

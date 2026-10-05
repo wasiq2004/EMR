@@ -32,7 +32,7 @@ import {
   primaryKeyColumn,
   tenantPolicy,
 } from './shared';
-import { appUser, clinic, clinicLocation } from './tenancy';
+import { appUser, clinic, clinicLocation, serviceItem } from './tenancy';
 
 /* ------------------------------------------------------------------------- *
  * 5. Patient (FHIR Patient)
@@ -105,6 +105,9 @@ export const patient = pgTable(
 
     /** 14-digit ABDM health account. Null until the patient opts in (M1). */
     abhaNumber: text('abha_number'),
+
+    /** Set by the client, once per registration attempt. See the index below. */
+    idempotencyKey: text('idempotency_key'),
     abhaAddress: text('abha_address'),
 
     /** Free-text flag surfaced prominently on the Patient Snapshot. */
@@ -152,6 +155,20 @@ export const patient = pgTable(
     }).onDelete('restrict'),
 
     uniqueIndex('patient_clinic_mrn_uq').on(t.clinicId, t.mrn),
+    /*
+     * One registration per attempt.
+     *
+     * The registration flow already half-prevented a duplicate by accident: the
+     * search token is consumed on use, so a second identical submit was refused.
+     * But it was refused with "search for the patient before creating a new
+     * record", which is a confusing message for somebody who just did — and it
+     * told them nothing about whether the first attempt had worked. With a key
+     * the retry returns the patient that was created, which is the answer they
+     * were looking for.
+     */
+    uniqueIndex('patient_idempotency_uq')
+      .on(t.clinicId, t.idempotencyKey)
+      .where(sql`idempotency_key IS NOT NULL`),
 
     /** The front desk's primary lookup. Must satisfy the <60s registration flow. */
     index('patient_clinic_mobile_idx')
@@ -310,6 +327,42 @@ export const appointment = pgTable(
     practitionerId: uuid('practitioner_id'),
     locationId: uuid('location_id'),
 
+    /**
+     * What the patient is booked IN FOR.
+     *
+     * `BookAppointment` has always accepted a `serviceItemId` and the booking
+     * path has always used it — to look up the service's duration and work out
+     * the end time — and then thrown it away, because there was no column to put
+     * it in. So the clinic chose a service, the slot length came from it, and
+     * nothing afterwards could say which service the appointment was.
+     *
+     * The cost of that showed up in the analytics: "how many consultations
+     * versus dressings did we book last month" is a question the schema could
+     * not answer, so the service filter there narrows revenue only and the
+     * control says so. This column is what makes it answerable going forward;
+     * appointments booked before it exists keep a null and are honestly
+     * uncategorised rather than retrospectively guessed at.
+     *
+     * `set null` on delete: retiring a service from the price list must not
+     * delete the history of appointments booked under it.
+     */
+    serviceItemId: uuid('service_item_id'),
+
+    /**
+     * Set by the client, once per booking attempt.
+     *
+     * A booking and a walk-in both write this table, and both are taken at a
+     * busy front desk where the first tap does not visibly do anything — so the
+     * terminal gets tapped again, or the request times out and the receptionist
+     * retries with a patient standing there. Two appointments for one person at
+     * one time is then something somebody has to notice and cancel, and until
+     * they do, the day looks fuller than it is and the doctor is double-booked.
+     *
+     * Nullable because every appointment made before this column existed has no
+     * key, and inventing one would be a claim about a request nobody recorded.
+     */
+    idempotencyKey: text('idempotency_key'),
+
     status: appointmentStatusEnum('status').notNull().default('SCHEDULED'),
 
     scheduledStart: timestamp('scheduled_start', { withTimezone: true }).notNull(),
@@ -350,6 +403,24 @@ export const appointment = pgTable(
   (t) => [
     foreignKey({ columns: [t.clinicId], foreignColumns: [clinic.id] }).onDelete('restrict'),
     foreignKey({ columns: [t.patientId], foreignColumns: [patient.id] }).onDelete('restrict'),
+    foreignKey({ columns: [t.serviceItemId], foreignColumns: [serviceItem.id] }).onDelete(
+      'set null',
+    ),
+    /*
+     * The guarantee lives here, not in the service.
+     *
+     * A check-then-insert in application code loses the race to two concurrent
+     * requests, which is exactly the double-tap this guards against. The service
+     * lookup turns the loser's constraint violation into a sensible answer; the
+     * index is what makes one of them lose.
+     *
+     * Leading with clinic_id so two clinics generating the same key cannot block
+     * each other, and partial so the rows predating the column are not all but
+     * one rejected.
+     */
+    uniqueIndex('appointment_idempotency_uq')
+      .on(t.clinicId, t.idempotencyKey)
+      .where(sql`idempotency_key IS NOT NULL`),
     foreignKey({ columns: [t.practitionerId], foreignColumns: [appUser.id] }).onDelete('set null'),
     foreignKey({ columns: [t.locationId], foreignColumns: [clinicLocation.id] }).onDelete('set null'),
 

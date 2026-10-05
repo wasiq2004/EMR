@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import fastifyCookie from '@fastify/cookie';
+import fastifyMultipart from '@fastify/multipart';
 
 import { AppModule } from './app.module';
 import { config } from './config';
@@ -20,6 +21,31 @@ async function bootstrap() {
   );
 
   await app.register(fastifyCookie);
+
+  /*
+   * File uploads.
+   *
+   * THE LIMITS ARE HERE AS WELL AS IN `StorageService`, deliberately. The
+   * service checks the size of a buffer it has already been handed, which means
+   * the process has already read the whole thing into memory to find out it was
+   * too big — a 2 GB upload would be refused only after it had been received.
+   * These limits make Fastify abort the stream instead.
+   *
+   * `files: 1` matters for the same reason. The upload route reads one file, so
+   * a request carrying fifty would have forty-nine parsed and discarded.
+   */
+  await app.register(fastifyMultipart, {
+    limits: {
+      // Matches MAX_UPLOAD_BYTES in StorageService. Both exist: this one stops
+      // the transfer, that one is the guarantee no oversized buffer is stored
+      // however it arrived.
+      fileSize: 25 * 1024 * 1024,
+      files: 1,
+      // A scanned report has a handful of fields. A thousand means something
+      // other than this product is talking to it.
+      fields: 20,
+    },
+  });
 
   app.setGlobalPrefix('v1');
 

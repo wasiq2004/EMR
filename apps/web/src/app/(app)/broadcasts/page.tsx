@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Megaphone, Plus, RotateCcw, Send, TriangleAlert, Users } from 'lucide-react';
+import { Ban, Megaphone, Plus, RotateCcw, Send, TriangleAlert, Users } from 'lucide-react';
 import type { WhatsappTemplate } from '@emr/contracts';
 import { ApiError, api } from '@/lib/api-client';
 import { formatDate } from '@/lib/format';
@@ -13,9 +13,12 @@ import { Field, Input } from '@/components/ui/field';
 import { PageHeader, Panel, PanelBody, PanelHeader } from '@/components/ui/surface';
 import { Alert, EmptyState, Skeleton } from '@/components/ui/feedback';
 import { useToast } from '@/components/ui/toast';
+import { Table, TBody, TD, TH, THead, TR, TableScroller } from '@/components/ui/table';
 import {
   Dialog,
+  DialogBody,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -49,6 +52,17 @@ interface Broadcast {
   startedAt: string | null;
   completedAt: string | null;
   createdAt: string;
+}
+
+interface Recipient {
+  id: string;
+  patientId: string | null;
+  patientName: string | null;
+  mobileE164: string;
+  status: string;
+  failureReason: string | null;
+  sentAt: string | null;
+  attemptCount: number;
 }
 
 interface AudienceFilter {
@@ -138,12 +152,61 @@ function BroadcastCard({ broadcast }: { broadcast: Broadcast }) {
   const toast = useToast();
   const queryClient = useQueryClient();
 
+  const [testNumber, setTestNumber] = React.useState('');
+  const [testing, setTesting] = React.useState(false);
+  const [showingRecipients, setShowingRecipients] = React.useState(false);
+
   const retry = useMutation({
     mutationFn: () => api.post(`/broadcasts/${broadcast.id}/retry`, {}),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['broadcasts'] });
       toast.success('Retrying the failed messages');
     },
+  });
+
+  /**
+   * Stops a send that is in flight.
+   *
+   * THE DISPATCHER CHECKS BETWEEN BATCHES, so this takes effect within about a
+   * second — it cannot unsend what has already gone, and the button says so.
+   * The endpoint has existed since the module shipped and nothing called it:
+   * a broadcast to several hundred patients could be started and not stopped,
+   * which is the one control that limits the damage when somebody realises the
+   * wrong template went out.
+   */
+  const cancel = useMutation({
+    mutationFn: () => api.post(`/broadcasts/${broadcast.id}/cancel`, {}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['broadcasts'] });
+      toast.success(
+        'Stopping the broadcast',
+        'Messages already sent cannot be recalled.',
+      );
+    },
+    onError: () => toast.error('Could not stop it', 'Try again in a moment.'),
+  });
+
+  /**
+   * One message to one number, before committing to hundreds.
+   *
+   * WhatsApp templates render differently from how they read in a form — a
+   * variable in the wrong position, a line break that does not survive — and the
+   * only way to know is to look at one on a phone. Sending to the whole audience
+   * to find out is not a rehearsal, it is the performance.
+   */
+  const sendTest = useMutation({
+    mutationFn: (toE164: string) =>
+      api.post(`/broadcasts/${broadcast.id}/test`, { toE164 }),
+    onSuccess: () => {
+      toast.success('Test sent', 'Check the handset before sending to everybody.');
+      setTesting(false);
+      setTestNumber('');
+    },
+    onError: (error) =>
+      toast.error(
+        'Could not send the test',
+        error instanceof ApiError ? error.message : undefined,
+      ),
   });
 
   const tone =
@@ -175,12 +238,66 @@ function BroadcastCard({ broadcast }: { broadcast: Broadcast }) {
             : `Created ${formatDate(broadcast.createdAt)}`
         }
         actions={
-          broadcast.failedCount > 0 ? (
-            <Button size="sm" variant="secondary" loading={retry.isPending} onClick={() => retry.mutate()}>
-              <RotateCcw aria-hidden />
-              Retry {broadcast.failedCount} failed
-            </Button>
-          ) : null
+          <>
+            {/*
+              A test send, while it is still a draft. Once it is sending, the
+              question is no longer "does this look right".
+            */}
+            {broadcast.status === 'DRAFT' || broadcast.status === 'SCHEDULED' ? (
+              <Button size="sm" variant="secondary" onClick={() => setTesting(true)}>
+                <Send aria-hidden />
+                Send a test
+              </Button>
+            ) : null}
+
+            {/*
+              Stop, only while it is actually going out. A finished broadcast has
+              nothing left to stop, and offering the button would imply the
+              messages could be recalled.
+            */}
+            {broadcast.status === 'SENDING' ? (
+              <Button
+                size="sm"
+                variant="critical"
+                loading={cancel.isPending}
+                onClick={() => cancel.mutate()}
+              >
+                <Ban aria-hidden />
+                Stop sending
+              </Button>
+            ) : null}
+
+            {broadcast.failedCount > 0 ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                loading={retry.isPending}
+                onClick={() => retry.mutate()}
+              >
+                <RotateCcw aria-hidden />
+                Retry {broadcast.failedCount} failed
+              </Button>
+            ) : null}
+
+            {/*
+              WHO, not how many. The counts are already on the card below, so a
+              list that only repeated them would not be worth a click. What is
+              missing is the names, and the case that needs them is a failure:
+              "clinic closed tomorrow" that did not reach eleven people means
+              eleven people are going to turn up to a locked door, and somebody
+              has to ring them. A number cannot be rung.
+            */}
+            {broadcast.recipientCount > 0 ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setShowingRecipients(true)}
+              >
+                <Users aria-hidden />
+                Who it reached
+              </Button>
+            ) : null}
+          </>
         }
       />
       <PanelBody className="flex flex-col gap-3">
@@ -210,7 +327,216 @@ function BroadcastCard({ broadcast }: { broadcast: Broadcast }) {
           </p>
         ) : null}
       </PanelBody>
+
+      <RecipientsDialog
+        broadcast={broadcast}
+        open={showingRecipients}
+        onOpenChange={setShowingRecipients}
+      />
+
+      <Dialog open={testing} onOpenChange={setTesting}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Send a test</DialogTitle>
+            <DialogDescription>
+              One message to one number, so you see the real thing before
+              {' '}
+              {broadcast.recipientCount > 0
+                ? `${broadcast.recipientCount} patients do`
+                : 'everybody does'}
+              .
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <Field
+              label="Send to"
+              htmlFor="test-number"
+              hint="With the country code. Your own handset is the usual choice."
+            >
+              <Input
+                className="token"
+                placeholder="+919876543210"
+                value={testNumber}
+                onChange={(event) => setTestNumber(event.target.value)}
+              />
+            </Field>
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setTesting(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              disabled={!/^\+[1-9]\d{7,14}$/.test(testNumber.trim())}
+              loading={sendTest.isPending}
+              onClick={() => sendTest.mutate(testNumber.trim())}
+            >
+              Send the test
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Panel>
+  );
+}
+
+/* --------------------------------------------------------------------------- */
+
+/**
+ * Who a broadcast actually reached, one row per patient.
+ *
+ * `GET /broadcasts/:id/recipients` has existed and been audited since the module
+ * shipped, and nothing in the product called it. The counts were visible; the
+ * names were not, which is the half that lets anybody act.
+ *
+ * FAILURES SORT FIRST, and not as a presentational nicety. A clinical broadcast
+ * is usually time-bound — closed tomorrow, camp on Sunday, bring the morning
+ * sample fasting — so the patients it did not reach are the only ones anybody
+ * can still do something about, and they are the minority of a long list. Making
+ * somebody scroll past four hundred delivered rows to find them is how the
+ * eleven get missed.
+ *
+ * The list is capped at 2,000 server-side. Said plainly when it bites rather
+ * than silently truncated, because a list that quietly stops is read as "that
+ * is everyone".
+ */
+function RecipientsDialog({
+  broadcast,
+  open,
+  onOpenChange,
+}: {
+  broadcast: Broadcast;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  // Only when it is actually opened. This is one request per broadcast card on
+  // a page that lists all of them, and nobody opens every card.
+  const recipients = useQuery({
+    queryKey: ['broadcast-recipients', broadcast.id],
+    queryFn: () =>
+      api.get<{ items: Recipient[] }>(`/broadcasts/${broadcast.id}/recipients`),
+    enabled: open,
+  });
+
+  const rows = React.useMemo(() => {
+    const items = recipients.data?.items ?? [];
+    const rank = (status: string) =>
+      status === 'FAILED' ? 0 : status === 'QUEUED' || status === 'SENDING' ? 1 : 2;
+    return [...items].sort(
+      (a, b) =>
+        rank(a.status) - rank(b.status) ||
+        (a.patientName ?? '').localeCompare(b.patientName ?? ''),
+    );
+  }, [recipients.data]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent size="lg">
+        <DialogHeader>
+          <DialogTitle>Who it reached</DialogTitle>
+          <DialogDescription>
+            {broadcast.name}
+            {broadcast.failedCount > 0
+              ? ` — ${broadcast.failedCount} did not get it, listed first.`
+              : null}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          {recipients.isPending ? (
+            <Skeleton className="h-48" />
+          ) : recipients.isError ? (
+            <Alert tone="critical" title="Could not load the list">
+              {recipients.error instanceof ApiError
+                ? recipients.error.message
+                : 'Try again in a moment.'}
+            </Alert>
+          ) : rows.length === 0 ? (
+            <EmptyState
+              title="No recipients yet"
+              description="The audience is resolved when the broadcast starts sending."
+            />
+          ) : (
+            <>
+              <TableScroller className="max-h-[22rem] rounded-lg border border-line">
+                <Table>
+                  <THead>
+                    <TR>
+                      <TH>Patient</TH>
+                      <TH>Number</TH>
+                      <TH>Status</TH>
+                      <TH>Sent</TH>
+                    </TR>
+                  </THead>
+                  <TBody>
+                    {rows.map((row) => (
+                      <TR key={row.id}>
+                        <TD className="text-ink">
+                          {/*
+                            A recipient whose patient record was merged away
+                            keeps its row — the message was still sent to that
+                            number, and dropping the row would make the sent
+                            count stop adding up.
+                          */}
+                          {row.patientName ?? 'Record no longer on file'}
+                        </TD>
+                        <TD className="token whitespace-nowrap">{row.mobileE164}</TD>
+                        <TD>
+                          <span className="flex flex-wrap items-center gap-2">
+                            <Badge
+                              tone={
+                                row.status === 'FAILED'
+                                  ? 'critical'
+                                  : row.status === 'DELIVERED' || row.status === 'READ'
+                                    ? 'positive'
+                                    : row.status === 'SENT'
+                                      ? 'info'
+                                      : 'neutral'
+                              }
+                            >
+                              {row.status}
+                            </Badge>
+                            {/*
+                              The reason, verbatim from WhatsApp. "Number not on
+                              WhatsApp" and "template was rejected" need
+                              completely different responses — the first is a
+                              phone call, the second affects every recipient —
+                              and a generic "failed" tells you neither.
+                            */}
+                            {row.failureReason ? (
+                              <span className="text-xs text-critical">
+                                {row.failureReason}
+                              </span>
+                            ) : null}
+                            {row.attemptCount > 1 ? (
+                              <span className="text-2xs text-ink-faint">
+                                {row.attemptCount} attempts
+                              </span>
+                            ) : null}
+                          </span>
+                        </TD>
+                        <TD className="whitespace-nowrap text-xs text-ink-faint">
+                          {row.sentAt ? formatDate(row.sentAt) : '—'}
+                        </TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+              </TableScroller>
+              {rows.length >= 2000 ? (
+                <p className="mt-2 text-xs text-ink-faint">
+                  Showing the first 2,000 recipients.
+                </p>
+              ) : null}
+            </>
+          )}
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="secondary" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

@@ -9,7 +9,7 @@ import type {
   PatientSnapshot,
   PatientSummary,
 } from '@emr/contracts';
-import { api, idempotencyKey } from '@/lib/api-client';
+import { api } from '@/lib/api-client';
 import { qk } from '@/lib/query-client';
 
 export function usePatients(search: string) {
@@ -85,12 +85,24 @@ export function useDuplicateCheck(mobile: string, name: string, enabled: boolean
   });
 }
 
+/**
+ * Registers a patient.
+ *
+ * THE KEY IS A BODY FIELD AND THE CALLER HOLDS IT — see `useAddWalkIn` for why a
+ * key minted inside a `mutationFn` protects nothing. The form passes
+ * `idempotencyKey` with the rest of the fields.
+ *
+ * What the key adds here is mostly a better answer rather than a new guarantee:
+ * the search token is single-use, so a second identical submit was already
+ * refused. It was refused with "search for the patient before creating a new
+ * record" — to a receptionist who had just searched, and who still could not
+ * tell whether the first attempt had worked. Now the retry returns the patient.
+ */
 export function useRegisterPatient() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (input: Record<string, unknown>) =>
-      api.post<Patient>('/patients', input, { idempotencyKey: idempotencyKey() }),
+    mutationFn: (input: Record<string, unknown>) => api.post<Patient>('/patients', input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['patients'] });
     },

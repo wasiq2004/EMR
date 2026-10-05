@@ -51,7 +51,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 rc=0
-for suite in api-reads availability consultation-flow reminders analytics lab broadcast platform; do
+for suite in api-reads availability consultation-flow reminders analytics lab pharmacy import research broadcast platform; do
   echo "=============================================================="
   echo " $suite"
   echo "=============================================================="

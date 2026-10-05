@@ -11,6 +11,7 @@
     "provision": "tsx src/database/provision.ts",
     "provision-operator": "tsx src/database/provision-operator.ts",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "lint": "eslint src",
     "prebuild": "pnpm --filter @emr/contracts --filter @emr/db build"
   },
@@ -18,6 +19,7 @@
     "@emr/contracts": "workspace:*",
     "@emr/db": "workspace:*",
     "@fastify/cookie": "^11.0.2",
+    "@fastify/multipart": "^10.1.2",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-fastify": "^11.0.0",
@@ -39,6 +41,7 @@
     "eslint": "^9.39.5",
     "tsx": "^4.20.3",
     "typescript": "^5.9.2",
-    "typescript-eslint": "^8.70.1"
+    "typescript-eslint": "^8.70.1",
+    "vitest": "^3.2.7"
   }
 }

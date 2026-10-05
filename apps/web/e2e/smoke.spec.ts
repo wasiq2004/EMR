@@ -32,6 +32,8 @@ const SIGN_IN: Record<string, string> = {
   NURSE_ASSISTANT: `nurse@${DOMAIN}`,
   OWNER_ADMIN: `owner@${DOMAIN}`,
   AUDITOR: `auditor@${DOMAIN}`,
+  PHARMACIST: `pharmacist@${DOMAIN}`,
+  RESEARCH_ANALYST: `analyst@${DOMAIN}`,
 };
 
 /** Noise from the dev server that says nothing about the application. */
@@ -610,4 +612,107 @@ test('a consultation records vitals, both kinds of diagnosis and a dosed drug', 
   expect(after[0]?.frequency).toBe('1-0-1');
 
   expect(problems, 'the consultation screen reported problems').toEqual([]);
+});
+
+/* -------------------------------------------------------------------------- *
+ * The three panels that had no render coverage at all
+ *
+ * Twenty-five screens — ten pharmacy, six analytics, nine platform — shipped
+ * with nothing checking that they render. That is the gap these tests close, and
+ * it is worth stating why a render check is not a trivial test here: every
+ * screen in this product is gated on a session that resolves client-side, so the
+ * HTML the server returns is a loading spinner. A page whose component throws
+ * still answers 200 with plausible markup. Only a real browser, with any console
+ * error failing the run, can tell the difference.
+ * -------------------------------------------------------------------------- */
+
+const PHARMACY_ROUTES = [
+  '/pharmacy',
+  '/pharmacy/clarifications',
+  '/pharmacy/stock',
+  '/pharmacy/products',
+  '/pharmacy/suppliers',
+  '/pharmacy/purchases',
+  '/pharmacy/sales',
+  '/pharmacy/alerts',
+  '/pharmacy/reports',
+];
+
+const ANALYTICS_ROUTES = [
+  '/analytics',
+  '/analytics/cohorts',
+  '/analytics/explorer',
+  '/analytics/quality',
+  '/analytics/dictionary',
+  '/analytics/exports',
+];
+
+const PLATFORM_ROUTES = [
+  '/platform',
+  '/platform/tenants',
+  '/platform/plans',
+  '/platform/operators',
+  '/platform/settings',
+  '/platform/audit',
+  '/platform/health',
+];
+
+test('Pharmacist opens every counter screen', async ({ page }) => {
+  const problems = watchConsole(page);
+  await signIn(page, 'PHARMACIST');
+  for (const path of PHARMACY_ROUTES) await visit(page, path, problems);
+});
+
+test('Research analyst opens every analytics screen', async ({ page }) => {
+  const problems = watchConsole(page);
+  await signIn(page, 'RESEARCH_ANALYST');
+  for (const path of ANALYTICS_ROUTES) await visit(page, path, problems);
+});
+
+/**
+ * The operations console.
+ *
+ * A DIFFERENT SESSION ENTIRELY — a platform operator is not a clinic user, holds
+ * a token with its own audience, and signs in at its own endpoint. That
+ * separation is the point of the console, so the test has to honour it rather
+ * than reusing a clinic cookie.
+ */
+test('Platform operator opens every console screen', async ({ page }) => {
+  const problems = watchConsole(page);
+
+  const email = process.env.VERIFY_OPERATOR_EMAIL;
+  const password = process.env.VERIFY_OPERATOR_PASSWORD;
+  expect(
+    email && password,
+    'Set VERIFY_OPERATOR_EMAIL and VERIFY_OPERATOR_PASSWORD — fixtures.mjs prints them.',
+  ).toBeTruthy();
+
+  const signedIn = await page.request.post('/api/platform/auth/login', {
+    data: { email, password },
+  });
+  expect(
+    signedIn.ok(),
+    `platform sign-in failed: ${signedIn.status()} ${await signedIn.text()}`,
+  ).toBe(true);
+
+  for (const path of PLATFORM_ROUTES) await visit(page, path, problems);
+});
+
+/**
+ * The console's login page, unauthenticated.
+ *
+ * Separate from the walk above because it is the one route in the set that must
+ * render WITHOUT a session — and a redirect loop here would lock every operator
+ * out of the console with no way back in.
+ */
+test('the operations console login renders without a session', async ({ browser }) => {
+  const anonymous = await browser.newContext();
+  try {
+    const page = await anonymous.newPage();
+    const problems = watchConsole(page);
+    await visit(page, '/platform/login', problems);
+    await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
+  } finally {
+    await anonymous.close();
+  }
 });

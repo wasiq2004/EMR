@@ -1,5 +1,6 @@
 'use client';
 
+import * as React from 'react';
 import { useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Check, X } from 'lucide-react';
@@ -12,6 +13,10 @@ import { Button } from '@/components/ui/button';
 import { Panel, PanelHeader } from '@/components/ui/surface';
 import { SkeletonRows } from '@/components/ui/feedback';
 import { useCan } from '@/lib/session';
+import {
+  RecordConsentDialog,
+  WithdrawConsentDialog,
+} from '@/features/patients/record-consent-dialog';
 
 /**
  * Consent, one row per purpose.
@@ -26,7 +31,21 @@ import { useCan } from '@/lib/session';
  */
 export default function PatientConsentsPage() {
   const params = useParams<{ id: string }>();
-  const canManage = useCan('consent:create');
+  const canRecord = useCan('consent:create');
+  /*
+   * Narrower than recording, deliberately, and it matches the API.
+   *
+   * Reception shows the notice and records the consent; withdrawing it stops
+   * reminders and broadcasts reaching that patient from the moment it lands, so
+   * it sits with the doctor and the administrator.
+   */
+  const canWithdraw = useCan('consent:update');
+
+  const [recording, setRecording] = React.useState<ConsentScope | null>(null);
+  const [withdrawing, setWithdrawing] = React.useState<{
+    id: string;
+    scope: ConsentScope;
+  } | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: qk.patientConsents(params.id),
@@ -75,9 +94,21 @@ export default function PatientConsentsPage() {
                   </Badge>
                 )}
 
-                {canManage ? (
-                  <Button size="sm" variant="secondary">
-                    {held ? 'Withdraw' : 'Record consent'}
+                {held && canWithdraw ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setWithdrawing({ id: held.id, scope })}
+                  >
+                    Withdraw
+                  </Button>
+                ) : !held && canRecord ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setRecording(scope)}
+                  >
+                    Record consent
                   </Button>
                 ) : null}
               </li>
@@ -85,6 +116,18 @@ export default function PatientConsentsPage() {
           })}
         </ul>
       )}
+
+      <RecordConsentDialog
+        patientId={params.id}
+        scope={recording}
+        onClose={() => setRecording(null)}
+      />
+      <WithdrawConsentDialog
+        patientId={params.id}
+        consentId={withdrawing?.id ?? null}
+        scope={withdrawing?.scope ?? null}
+        onClose={() => setWithdrawing(null)}
+      />
     </Panel>
   );
 }

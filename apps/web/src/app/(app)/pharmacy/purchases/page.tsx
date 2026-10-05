@@ -19,7 +19,7 @@ import {
   useSuppliers,
 } from '@/features/pharmacy/api';
 import { useSession } from '@/lib/session';
-import { ApiError } from '@/lib/api-client';
+import { ApiError, idempotencyKey } from '@/lib/api-client';
 import { formatDate, formatDateTime, formatPaise } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -582,6 +582,15 @@ function ReceiveDialog({
 }) {
   const toast = useToast();
   const receive = useReceiveGoods();
+
+  /*
+   * One key per delivery the user is entering, not one per attempt.
+   *
+   * Held in a ref and replaced only after it lands. A key minted inside the
+   * mutation is new on every retry, so the server sees a second distinct
+   * delivery and performs it — which is the exact failure the key prevents.
+   */
+  const submitKey = React.useRef(idempotencyKey());
   const suppliers = useSuppliers();
   const products = useProducts();
   const order = usePurchaseOrder(purchaseOrderId || '');
@@ -770,6 +779,7 @@ function ReceiveDialog({
                   supplierInvoiceNumber: invoiceNumber || null,
                   supplierInvoiceDate: null,
                   notes: null,
+                  idempotencyKey: submitKey.current,
                   lines: complete.map((l) => ({
                     productId: l.productId,
                     batchNumber: l.batchNumber,
@@ -782,6 +792,7 @@ function ReceiveDialog({
                 },
                 {
                   onSuccess: () => {
+                    submitKey.current = idempotencyKey();
                     toast.success('Delivery received — stock updated');
                     onClose();
                   },

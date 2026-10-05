@@ -7,6 +7,7 @@ import { GitMerge, Users } from 'lucide-react';
 import type { Task } from '@emr/contracts';
 import { api } from '@/lib/api-client';
 import { qk } from '@/lib/query-client';
+import { MergePatientsDialog } from '@/features/patients/merge-dialog';
 import { Button } from '@/components/ui/button';
 import { Panel, PanelHeader, PageHeader } from '@/components/ui/surface';
 import { Alert, EmptyState, SkeletonRows } from '@/components/ui/feedback';
@@ -24,6 +25,16 @@ import { Alert, EmptyState, SkeletonRows } from '@/components/ui/feedback';
  * identifier permanently so the history can be reconstructed.
  */
 export default function MergePatientsPage() {
+  /*
+   * The pair being merged. Null closes the dialog.
+   *
+   * Held here rather than inside the row, so only one merge is ever open and
+   * the dialog is mounted once.
+   */
+  const [merging, setMerging] = React.useState<{ first: string; second: string } | null>(
+    null,
+  );
+
   const { data, isLoading } = useQuery({
     queryKey: qk.duplicateCandidates,
     queryFn: () => api.get<{ items: Task[] }>('/tasks', { query: { filter: 'open' } }),
@@ -80,7 +91,35 @@ export default function MergePatientsPage() {
                       <Link href={`/patients/${task.focusResourceId}`}>Open second</Link>
                     </Button>
                   ) : null}
-                  <Button size="sm" variant="primary">
+                  {/*
+                    The page's primary action, which did nothing at all: a
+                    `<Button>` with no `onClick`, while `POST /patients/merge`
+                    and its service were complete and waiting.
+                    
+                    Disabled when the task does not name both records. The
+                    duplicate check writes the pair onto the task, and a task
+                    missing one of them cannot be acted on here — offering a
+                    merge that would fail on submit is worse than a greyed
+                    button that explains itself.
+                  */}
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    disabled={!task.patientId || !task.focusResourceId}
+                    title={
+                      !task.patientId || !task.focusResourceId
+                        ? 'This task does not name both records'
+                        : undefined
+                    }
+                    onClick={() =>
+                      task.patientId && task.focusResourceId
+                        ? setMerging({
+                            first: task.patientId,
+                            second: task.focusResourceId,
+                          })
+                        : undefined
+                    }
+                  >
                     <GitMerge aria-hidden />
                     Review and merge
                   </Button>
@@ -90,6 +129,12 @@ export default function MergePatientsPage() {
           </ul>
         )}
       </Panel>
+
+      <MergePatientsDialog
+        firstId={merging?.first ?? null}
+        secondId={merging?.second ?? null}
+        onClose={() => setMerging(null)}
+      />
     </div>
   );
 }

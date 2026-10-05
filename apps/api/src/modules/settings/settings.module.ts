@@ -10,12 +10,14 @@ import {
   Patch,
   Post,
 } from '@nestjs/common';
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import * as schema from '@emr/db/schema';
 import {
   InviteStaff,
+  RecordConsent,
   SaveLocation,
   SaveServiceItem,
+  WithdrawConsent,
   type Clinic,
   type ServiceItem,
   type StaffUser,
@@ -369,17 +371,123 @@ export class SettingsService {
     });
   }
 
+  /**
+   * Records a consent.
+   *
+   * ONE ACTIVE CONSENT PER SCOPE PER PATIENT, enforced by a partial unique index
+   * the schema has carried since the beginning. Re-recording the same scope
+   * therefore supersedes rather than duplicating: the previous row is marked
+   * INACTIVE and keeps its history, and a fresh one is written. Two live
+   * consents for one purpose is a state nobody could act on — which applies
+   * now, this one or that one?
+   */
+  async recordConsent(patientId: string, input: Record<string, unknown>) {
+    const ctx = TenantContext.require();
+
+    return this.tenantDb.run(async (tx) => {
+      const [patient] = await tx
+        .select({ id: schema.patient.id })
+        .from(schema.patient)
+        .where(eq(schema.patient.id, patientId))
+        .limit(1);
+      if (!patient) throw new NotFoundException('That patient could not be found.');
+
+      /*
+       * Supersede the live one first, in the same transaction.
+       *
+       * INACTIVE rather than deleted: a consent that was held and then replaced
+       * is part of the record, and the clinic may need to show what applied on
+       * a given date.
+       */
+      await tx
+        .update(schema.consent)
+        .set({ status: 'INACTIVE', updatedBy: ctx.userId })
+        .where(
+          and(
+            eq(schema.consent.patientId, patientId),
+            eq(schema.consent.scope, input.scope as 'TREATMENT'),
+            eq(schema.consent.status, 'ACTIVE'),
+          ),
+        );
+
+      const [created] = await tx
+        .insert(schema.consent)
+        .values({
+          clinicId: ctx.clinicId,
+          patientId,
+          scope: input.scope as 'TREATMENT',
+          status: 'ACTIVE',
+          policyVersion: String(input.policyVersion),
+          captureMethod: String(input.captureMethod),
+          presentedLanguage: String(input.presentedLanguage ?? 'en'),
+          expiresAt: input.expiresAt ? new Date(String(input.expiresAt)) : null,
+          evidenceObjectKey: (input.evidenceObjectKey as string) ?? null,
+          createdBy: ctx.userId,
+          updatedBy: ctx.userId,
+        })
+        .returning();
+
+      return serialiseConsent(created!);
+    });
+  }
+
+  /**
+   * Withdraws a consent.
+   *
+   * The row stays and gains `withdrawn_at`. A message sent last week was
+   * lawfully sent, and erasing the consent would make it look otherwise in
+   * hindsight — so the clinic can show both that consent was held and that it
+   * was withdrawn.
+   *
+   * No reason is required. A patient exercising a right under the Act should not
+   * have to justify it to a receptionist before the system accepts it.
+   */
+  async withdrawConsent(consentId: string, reason: string | null) {
+    const ctx = TenantContext.require();
+
+    return this.tenantDb.run(async (tx) => {
+      const [current] = await tx
+        .select()
+        .from(schema.consent)
+        .where(eq(schema.consent.id, consentId))
+        .limit(1);
+      if (!current) throw new NotFoundException('That consent could not be found.');
+
+      // Withdrawing twice is a no-op, not an error: the second person to press
+      // it wanted the same outcome and got it.
+      if (current.withdrawnAt) return serialiseConsent(current);
+
+      const [updated] = await tx
+        .update(schema.consent)
+        .set({
+          status: 'INACTIVE',
+          withdrawnAt: new Date(),
+          withdrawnReason: reason,
+          updatedBy: ctx.userId,
+        })
+        .where(eq(schema.consent.id, consentId))
+        .returning();
+
+      return serialiseConsent(updated!);
+    });
+  }
+
   async consentsFor(patientId: string) {
     const rows = await this.tenantDb.runReadOnly((tx) =>
       tx.select().from(schema.consent).where(eq(schema.consent.patientId, patientId)),
     );
-    return rows.map((r) => ({
-      ...r,
-      grantedAt: r.grantedAt.toISOString(),
-      expiresAt: r.expiresAt?.toISOString() ?? null,
-      withdrawnAt: r.withdrawnAt?.toISOString() ?? null,
-    }));
+    return rows.map(serialiseConsent);
   }
+}
+
+/** Timestamps out as ISO strings, in one place rather than three. */
+function serialiseConsent(row: typeof schema.consent.$inferSelect) {
+  return {
+    ...row,
+    grantedAt: row.grantedAt.toISOString(),
+    expiresAt: row.expiresAt?.toISOString() ?? null,
+    withdrawnAt: row.withdrawnAt?.toISOString() ?? null,
+  };
 }
 
 @Controller()
@@ -465,6 +573,44 @@ class SettingsController {
   @Get('patients/:id/consents')
   consents(@Param('id') id: string) {
     return this.settings.consentsFor(requireUuid(id, 'Patient'));
+  }
+
+  /**
+   * Records a consent.
+   *
+   * `consent:create`, which the doctor, the nurse, the administrator and
+   * reception hold — the person who shows the notice and the person who signs
+   * them up are frequently the same, and a consent nobody can record is a
+   * consent nobody obtains.
+   *
+   * Audited, and this is one of the entries that matters most: under DPDP a
+   * clinic has to be able to show WHO recorded a consent and WHEN, not merely
+   * that a row exists.
+   */
+  @RequirePermission('consent:create')
+  @Audit('CONSENT_RECORDED', 'consent')
+  @Post('patients/:id/consents')
+  recordConsent(@Param('id') id: string, @Body() body: unknown) {
+    return this.settings.recordConsent(
+      requireUuid(id, 'Patient'),
+      parseBody(RecordConsent, body),
+    );
+  }
+
+  /**
+   * Withdraws one.
+   *
+   * `consent:update`, which is narrower than `create` — only the administrator
+   * and the doctor hold it. Withdrawal is the act with the larger blast radius:
+   * it stops reminders and broadcasts reaching that patient from the moment it
+   * lands, because every consumer checks at the point of use.
+   */
+  @RequirePermission('consent:update')
+  @Audit('CONSENT_WITHDRAWN', 'consent')
+  @Post('consents/:id/withdraw')
+  withdrawConsent(@Param('id') id: string, @Body() body: unknown) {
+    const input = parseBody(WithdrawConsent, body ?? {});
+    return this.settings.withdrawConsent(requireUuid(id, 'Consent'), input.reason ?? null);
   }
 }
 

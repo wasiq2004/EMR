@@ -135,14 +135,16 @@ export default function ClinicAnalyticsPage() {
             htmlFor="serviceItemId"
             className="w-48"
             /*
-             * Said on the control rather than left to be discovered.
+             * Now narrows both. `appointment.service_item_id` was added after
+             * this screen shipped; before it, the booking path discarded the
+             * chosen service and this could only filter the money.
              *
-             * An appointment does not record a service — the booking path uses
-             * it to work out the end time and discards it — so this narrows the
-             * money and not the appointment counts. A filter that silently
-             * applied to half the page would be worse than one that says so.
+             * The hint stays, because appointments booked before that column
+             * existed carry null and drop out of a service-filtered count —
+             * which is correct, and worth saying rather than leaving somebody to
+             * wonder why last quarter looks empty.
              */
-            hint="Narrows revenue only."
+            hint="Appointments booked before Oct 2026 have no service recorded."
           >
             <Select
               value={filters.serviceItemId ?? ''}

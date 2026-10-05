@@ -9,7 +9,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { PrescriptionLine, ReviseDosage } from '@emr/contracts';
+import { AddDrugToCatalogue, PrescriptionLine, ReviseDosage } from '@emr/contracts';
 import { Audit, RequirePermission } from '../../common/http/decorators';
 import { parseBody, requireUuid } from '../../common/http/zod.pipe';
 import { PrescribingService } from './prescribing.service';
@@ -24,6 +24,21 @@ export class PrescribingController {
   async search(@Query('q') q?: string, @Query('limit') limit?: string) {
     const items = await this.prescribing.searchDrugs(q ?? '', limit ? Number(limit) : 12);
     return { items };
+  }
+
+  /**
+   * Adds a drug this clinic stocks that the shared catalogue lacks.
+   *
+   * `clinic:update`, not `prescription:create`. Prescribing an uncatalogued drug
+   * is clinical work every doctor does and has always been possible; adding to
+   * the clinic's list changes what everybody in the clinic is offered from then
+   * on, which is configuration. The same split as the diagnosis catalogue.
+   */
+  @RequirePermission('clinic:update')
+  @Audit('DRUG_ADDED_TO_CATALOGUE', 'clinic')
+  @Post('drugs')
+  addToCatalogue(@Body() body: unknown) {
+    return this.prescribing.addToCatalogue(parseBody(AddDrugToCatalogue, body));
   }
 
   @RequirePermission('prescription:read')

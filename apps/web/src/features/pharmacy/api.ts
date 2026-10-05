@@ -15,6 +15,7 @@ import type {
   PurchaseOrder,
   ReceiveGoods,
   RecordSale,
+  ReturnSale,
   SaleRow,
   SaveProduct,
   SavePurchaseOrder,
@@ -23,7 +24,7 @@ import type {
   StockMovementRow,
   Supplier,
 } from '@emr/contracts';
-import { api, idempotencyKey } from '@/lib/api-client';
+import { api } from '@/lib/api-client';
 
 /**
  * The pharmacy data layer.
@@ -57,6 +58,7 @@ export const pk = {
   order: (id: string) => ['pharmacy', 'order', id] as const,
   receipts: () => ['pharmacy', 'receipts'] as const,
   sales: () => ['pharmacy', 'sales'] as const,
+  sale: (id: string) => ['pharmacy', 'sale', id] as const,
   quote: (id: string) => ['pharmacy', 'quote', id] as const,
   report: (days: number) => ['pharmacy', 'report', days] as const,
 };
@@ -107,18 +109,29 @@ export function useStartDispense() {
   });
 }
 
+/**
+ * Fills one prescription line.
+ *
+ * NO IDEMPOTENCY KEY, and that is correct rather than an omission.
+ *
+ * This comment used to say the opposite — "a double-submitted fill would move
+ * stock twice, and the second movement would be indistinguishable from a genuine
+ * correction" — and passed a key as an `Idempotency-Key` header, which nothing
+ * on the server reads. Both halves were wrong. Reading
+ * `DispensingService.fillLine`: it calls `reverseExisting` first, returning the
+ * line's previous quantity to stock, and only then issues the new amount. It is
+ * a SET, not an ADD. Submitting the same fill twice reverses and re-issues, and
+ * the net stock is right.
+ *
+ * What a double-submit does cost is two extra rows in the movement ledger. That
+ * is noise in an append-only audit trail rather than wrong stock, and it is the
+ * honest price of a correction path that works.
+ */
 export function useFillLine() {
   const invalidate = useInvalidatePharmacy();
   return useMutation({
     mutationFn: ({ lineId, input }: { lineId: string; input: FillLine }) =>
-      api.post(`/pharmacy/lines/${lineId}/fill`, input, {
-        /*
-         * Idempotency matters more here than almost anywhere in the product: a
-         * double-submitted fill would move stock twice, and the second movement
-         * would be indistinguishable from a genuine correction.
-         */
-        idempotencyKey: idempotencyKey(),
-      }),
+      api.post(`/pharmacy/lines/${lineId}/fill`, input),
     onSuccess: invalidate,
   });
 }
@@ -392,11 +405,23 @@ export function useReceipts() {
   });
 }
 
+/**
+ * Records a delivery.
+ *
+ * THE KEY GOES IN THE BODY. It used to be passed as an `Idempotency-Key`
+ * header, which nothing on the server reads — so a receipt submitted twice
+ * created stock twice, and the shortfall surfaced at the next count with no way
+ * to tell which receipt was the phantom. `ReceiveGoods` requires it now and a
+ * partial unique index enforces it.
+ *
+ * The caller supplies the key and holds it stable across retries; minting one
+ * inside `mutationFn` would produce a fresh key per attempt, which is not
+ * idempotency at all.
+ */
 export function useReceiveGoods() {
   const invalidate = useInvalidatePharmacy();
   return useMutation({
-    mutationFn: (input: ReceiveGoods) =>
-      api.post('/pharmacy/receipts', input, { idempotencyKey: idempotencyKey() }),
+    mutationFn: (input: ReceiveGoods) => api.post('/pharmacy/receipts', input),
     onSuccess: invalidate,
   });
 }
@@ -443,11 +468,93 @@ export function useDispenseQuote(dispenseId: string, enabled: boolean) {
   });
 }
 
+/**
+ * Takes money and removes stock.
+ *
+ * Same correction as `useReceiveGoods`: the key is a body field the server
+ * actually reads, not a header it ignores. A double-tap at a counter used to
+ * charge the customer twice and remove the stock twice.
+ */
 export function useRecordSale() {
   const invalidate = useInvalidatePharmacy();
   return useMutation({
-    mutationFn: (input: RecordSale) =>
-      api.post('/pharmacy/sales', input, { idempotencyKey: idempotencyKey() }),
+    mutationFn: (input: RecordSale) => api.post('/pharmacy/sales', input),
+    onSuccess: invalidate,
+  });
+}
+
+/**
+ * One sale with its lines.
+ *
+ * The list gives totals and a line COUNT, which is enough to show the till and
+ * not enough to take anything back: a return line has to name the batch the
+ * goods came off, and nothing returned a batch id until `GET /pharmacy/sales/:id`
+ * was added. That is why the return endpoint sat implemented and unreachable.
+ */
+export function useSale(id: string | null) {
+  return useQuery({
+    queryKey: pk.sale(id ?? 'none'),
+    queryFn: () => api.get<SaleDetail>(`/pharmacy/sales/${id}`),
+    enabled: Boolean(id),
+  });
+}
+
+export interface SaleDetail {
+  id: string;
+  saleNumber: string;
+  status: string;
+  patientId: string | null;
+  patientName: string | null;
+  buyerName: string | null;
+  totalPaise: number;
+  paidPaise: number;
+  paymentMethod: string | null;
+  soldAt: string | null;
+  soldByName: string | null;
+  isReturn: boolean;
+  returnOfSaleId: string | null;
+  returnReason: string | null;
+  lines: {
+    id: string;
+    productId: string;
+    productName: string | null;
+    packUnit: string | null;
+    stockBatchId: string;
+    batchNumber: string | null;
+    expiryDate: string | null;
+    quantity: number;
+    unitPricePaise: number;
+    gstRateBps: number;
+    lineTotalPaise: number;
+    alreadyReturned: number;
+    /** Sold, net of returns already recorded. The server computes it. */
+    returnableQuantity: number;
+  }[];
+}
+
+/**
+ * Takes goods back and puts the stock on the batch it came off.
+ *
+ * NOT A CORRECTION TO THE ORIGINAL SALE. The server writes a second sale with
+ * negative lines pointing at the first, because the original transaction
+ * happened and a till that can make a sale disappear cannot be reconciled
+ * against a cash drawer.
+ *
+ * No idempotency key, and this is a deliberate difference from `useRecordSale`.
+ * A duplicate return would put the stock back twice and refund twice, so it
+ * matters — but the server already caps each product at what was sold net of
+ * returns, which makes the second submission fail with "more than was sold"
+ * rather than silently doubling. That is a correct refusal, not a race, so a key
+ * would buy a tidier error message and nothing else.
+ */
+export function useReturnSale() {
+  const invalidate = useInvalidatePharmacy();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: ReturnSale }) =>
+      api.post<{ id: string; saleNumber: string; refundedPaise: number }>(
+        `/pharmacy/sales/${id}/return`,
+        input,
+      ),
     onSuccess: invalidate,
   });
 }

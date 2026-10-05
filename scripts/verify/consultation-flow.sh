@@ -247,6 +247,50 @@ check "revising a line that does not exist is a 404" 404 "$CODE" "$BODY"
 req DELETE "/prescriptions/$TAPER"
 check "remove the tapering line" 204 "$CODE" "$BODY"
 
+echo "-- adding a drug the shared catalogue does not have --"
+# Prescribing an uncatalogued drug has always worked. This is the separate act
+# of KEEPING it, so the next doctor finds it by searching and the allergy check
+# has a molecule to reason about.
+login doctor@$VERIFY_DOMAIN
+req POST /drugs '{"brandName":"Zyrtec-D","moleculeName":"Cetirizine + Pseudoephedrine","strength":"5/120 mg","dosageForm":"Tablet"}'
+check "a doctor cannot add to the clinic drug list" 403 "$CODE" "$BODY"
+
+login owner@$VERIFY_DOMAIN
+req POST /drugs '{"brandName":"Zyrtec-D","moleculeName":"Cetirizine + Pseudoephedrine","strength":"5/120 mg","dosageForm":"Tablet","route":"Oral"}'
+check "an administrator can" 201 "$CODE" "$BODY"
+printf '%s' "$BODY" | grep -q 'Cetirizine'   && check "the molecule is stored" y y   || check "the molecule is stored" y n
+
+# The molecule is what the allergy class map reasons about. A brand with no
+# molecule would search well and check nothing, which is worse than being absent
+# from the catalogue.
+req POST /drugs '{"brandName":"Mystery Tablet"}'
+check "a row with no molecule is refused" 422 "$CODE" "$BODY"
+req POST /drugs '{"moleculeName":"x"}'
+check "and so is a one-character molecule" 422 "$CODE" "$BODY"
+
+# Twice is not an error: two doctors reaching for the same missing drug on the
+# same morning is expected, not a conflict either should have to resolve.
+req POST /drugs '{"brandName":"Zyrtec-D","moleculeName":"Cetirizine + Pseudoephedrine","strength":"5/120 mg","dosageForm":"Tablet","route":"Oral"}'
+check "adding the same drug twice is idempotent" 201 "$CODE" "$BODY"
+
+login doctor@$VERIFY_DOMAIN
+req GET '/drugs/search?q=zyrtec'
+printf '%s' "$BODY" | grep -q 'Zyrtec-D'   && check "the clinic's own drug is searchable" y y   || check "the clinic's own drug is searchable" y n
+# Schedule is NULL unless stated. Claiming one nobody verified is worse than
+# claiming none: Schedule X carries a telemedicine prohibition the server
+# enforces, so a wrong value blocks a legitimate prescription or waves through
+# one the law forbids.
+printf '%s' "$BODY" | grep -q '"drugSchedule":null'   && check "an unstated schedule is null, not guessed at H" y y   || check "an unstated schedule is null, not guessed at H" y n
+
+# And it is prescribable like any other catalogue row.
+NEWDRUG=$(printf '%s' "$BODY" | tr '{' '\n' | grep 'Zyrtec-D' | grep -o '"id":"[0-9a-f-]\{36\}"' | head -1 | cut -d'"' -f4)
+req POST "/encounters/$ENC/prescriptions" "{
+  \"catalogueItemId\":\"$NEWDRUG\",
+  \"drugDisplayName\":\"Zyrtec-D\",\"moleculeName\":\"Cetirizine + Pseudoephedrine\",
+  \"frequency\":\"0-0-1\",\"durationDays\":5
+}"
+check "and it can be prescribed from the catalogue" 201 "$CODE" "$BODY"
+
 echo "-- the diagnosis catalogue --"
 # Roughly 300 curated ICD-10 codes rather than the full seventy thousand: a
 # search for "fever" in the complete set returns dozens of qualifiers nobody at

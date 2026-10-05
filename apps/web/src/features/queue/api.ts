@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Appointment, QueueEntry } from '@emr/contracts';
-import { api, idempotencyKey } from '@/lib/api-client';
+import { api } from '@/lib/api-client';
 import { qk } from '@/lib/query-client';
 
 export interface QueueResponse {
@@ -40,6 +40,19 @@ export function useQueue() {
   });
 }
 
+/**
+ * Adds a walk-in to the queue.
+ *
+ * THE KEY IS A BODY FIELD AND IT IS THE CALLER'S. It used to be minted here, in
+ * the `mutationFn`, and sent as an `Idempotency-Key` header — which nothing on
+ * the server read, and which was minted afresh on every retry anyway, so the
+ * server would have seen two distinct operations even if it had been reading it.
+ * Two failures stacked into the appearance of care.
+ *
+ * The caller holds the key now, stably, across attempts. A hook cannot do that:
+ * `useMutation` has no notion of "the walk-in the user is adding" as distinct
+ * from "this attempt at adding it".
+ */
 export function useAddWalkIn() {
   const queryClient = useQueryClient();
 
@@ -48,7 +61,8 @@ export function useAddWalkIn() {
       patientId: string;
       practitionerId?: string | null;
       reasonText?: string | null;
-    }) => api.post<Appointment>('/queue', input, { idempotencyKey: idempotencyKey() }),
+      idempotencyKey: string;
+    }) => api.post<Appointment>('/queue', input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qk.queue() });
       void queryClient.invalidateQueries({ queryKey: ['nav-counts'] });

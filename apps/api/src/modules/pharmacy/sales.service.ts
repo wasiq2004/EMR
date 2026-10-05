@@ -105,6 +105,27 @@ export class SalesService {
     return this.tenantDb.run(async (tx) => {
       await this.assertSellable(tx, input.lines.map((l) => l.productId), Boolean(input.dispenseRecordId));
 
+      /*
+       * Already sold is not an error, and must not be sold again.
+       *
+       * A SALE TAKES MONEY AND REMOVES STOCK. A duplicate charges the customer
+       * twice and understates the shelf, and reconciling it afterwards means
+       * deciding which of two identical rows never happened — which nobody can.
+       * The totals are recomputed rather than stored on the row, so the original
+       * is returned in the same shape a fresh sale would be.
+       */
+      const [already] = await tx
+        .select({
+          id: schema.pharmacySale.id,
+          saleNumber: schema.pharmacySale.saleNumber,
+        })
+        .from(schema.pharmacySale)
+        .where(eq(schema.pharmacySale.idempotencyKey, input.idempotencyKey))
+        .limit(1);
+      if (already) {
+        return { id: already.id, saleNumber: already.saleNumber, ...totals };
+      }
+
       const saleNumber = await nextSaleNumber(tx);
 
       const [sale] = await tx
@@ -123,6 +144,7 @@ export class SalesService {
           totalPaise: totals.totalPaise,
           paidPaise: input.paidPaise,
           paymentMethod: input.paymentMethod,
+          idempotencyKey: input.idempotencyKey,
           soldBy: ctx.userId,
           soldAt: new Date(),
           createdBy: ctx.userId,
@@ -167,6 +189,131 @@ export class SalesService {
       }
 
       return { id: sale!.id, saleNumber, ...totals };
+    });
+  }
+
+  /**
+   * One sale, with its lines and what is still returnable on each.
+   *
+   * WHY THIS EXISTS. `POST /pharmacy/sales/:id/return` has been implemented and
+   * audited since the module shipped, and nothing could call it, because a return
+   * needs `stockBatchId` per line and no read endpoint returned one. The list
+   * gives totals and a line COUNT; the lines themselves were not reachable.
+   *
+   * The batch is not a detail that a screen could reasonably guess. `recordReturn`
+   * puts the stock back on the batch the line names, and the service says why:
+   * returning it to an arbitrary batch corrupts the expiry tracking the whole
+   * module exists for. A packet sold from a batch expiring next month must go
+   * back on THAT batch, or the clinic will later dispense expired medicine
+   * believing it has eleven months left.
+   *
+   * `returnableQuantity` is computed here rather than in the browser because it
+   * is the same arithmetic `recordReturn` enforces — sold, net of returns already
+   * recorded. Two places computing it from different data is how a screen starts
+   * offering a quantity the server then refuses.
+   */
+  async saleDetail(id: string) {
+    return this.tenantDb.runReadOnly(async (tx) => {
+      const [row] = await tx
+        .select({
+          sale: schema.pharmacySale,
+          patientName: schema.patient.fullName,
+          soldByName: schema.appUser.fullName,
+        })
+        .from(schema.pharmacySale)
+        .leftJoin(schema.patient, eq(schema.patient.id, schema.pharmacySale.patientId))
+        .leftJoin(schema.appUser, eq(schema.appUser.id, schema.pharmacySale.soldBy))
+        .where(eq(schema.pharmacySale.id, id))
+        .limit(1);
+
+      if (!row) throw new NotFoundException('That sale could not be found.');
+
+      const lines = await tx
+        .select({
+          line: schema.pharmacySaleLine,
+          productName: schema.pharmacyProduct.name,
+          packUnit: schema.pharmacyProduct.packUnit,
+          batchNumber: schema.stockBatch.batchNumber,
+          expiryDate: schema.stockBatch.expiryDate,
+        })
+        .from(schema.pharmacySaleLine)
+        .leftJoin(
+          schema.pharmacyProduct,
+          eq(schema.pharmacyProduct.id, schema.pharmacySaleLine.productId),
+        )
+        .leftJoin(
+          schema.stockBatch,
+          eq(schema.stockBatch.id, schema.pharmacySaleLine.stockBatchId),
+        )
+        .where(eq(schema.pharmacySaleLine.pharmacySaleId, id));
+
+      /*
+       * Already returned, per BATCH rather than per product.
+       *
+       * `recordReturn` checks the cap per product, which is the right check for
+       * "you cannot return more than was sold". But the quantity a screen offers
+       * has to be per batch, because the batch is what the return line must
+       * name. A sale of ten from two batches needs both rows offered separately.
+       */
+      const returnedRows = await tx
+        .select({
+          stockBatchId: schema.pharmacySaleLine.stockBatchId,
+          quantity: sql<number>`coalesce(sum(${schema.pharmacySaleLine.quantity}), 0)::int`,
+        })
+        .from(schema.pharmacySaleLine)
+        .innerJoin(
+          schema.pharmacySale,
+          eq(schema.pharmacySale.id, schema.pharmacySaleLine.pharmacySaleId),
+        )
+        .where(eq(schema.pharmacySale.returnOfSaleId, id))
+        .groupBy(schema.pharmacySaleLine.stockBatchId);
+
+      // Return lines are stored negative, so the sums come back negative.
+      const returnedBy = new Map(
+        returnedRows.map((r) => [r.stockBatchId, Math.abs(r.quantity)]),
+      );
+
+      return {
+        id: row.sale.id,
+        saleNumber: row.sale.saleNumber,
+        status: row.sale.status,
+        patientId: row.sale.patientId,
+        patientName: row.patientName,
+        buyerName: row.sale.buyerName,
+        totalPaise: row.sale.totalPaise,
+        paidPaise: row.sale.paidPaise,
+        paymentMethod: row.sale.paymentMethod,
+        soldAt: row.sale.soldAt?.toISOString() ?? null,
+        soldByName: row.soldByName,
+        isReturn: row.sale.isReturn,
+        returnOfSaleId: row.sale.returnOfSaleId,
+        returnReason: row.sale.returnReason,
+        lines: lines.map(({ line, productName, packUnit, batchNumber, expiryDate }) => {
+          const sold = line.quantity;
+          const alreadyReturned = returnedBy.get(line.stockBatchId) ?? 0;
+          return {
+            id: line.id,
+            productId: line.productId,
+            productName,
+            packUnit,
+            stockBatchId: line.stockBatchId,
+            batchNumber,
+            expiryDate,
+            quantity: sold,
+            unitPricePaise: line.unitPricePaise,
+            gstRateBps: line.gstRateBps,
+            lineTotalPaise: line.lineTotalPaise,
+            alreadyReturned,
+            /*
+             * Zero on a return document's own lines: `sold` is negative there,
+             * and the clamp keeps it from reading as a returnable quantity.
+             * `recordReturn` refuses to return against a return anyway, but a
+             * screen should not offer it in the first place.
+             */
+            returnableQuantity: Math.max(0, sold - alreadyReturned),
+          };
+        }),
+      };
     });
   }
 

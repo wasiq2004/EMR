@@ -136,6 +136,17 @@ export class ShareLinkService {
     });
 
     return {
+      /*
+       * The id, so the caller can revoke it.
+       *
+       * It was not returned before, which is why the share dialog could promise
+       * "it can be revoked at any time" and offer no way to do it:
+       * `POST /share-links/:id/revoke` existed and the screen had no id to call
+       * it with. Returning it is not a leak — the recipient never sees this
+       * response, and the token, which is the sensitive part, is already in the
+       * URL below.
+       */
+      id: result.link.id,
       url: `${config.PUBLIC_BASE_URL}/share/${token}`,
       expiresAt: expiresAt.toISOString(),
       requiresOtp: result.requireOtp,

@@ -179,8 +179,19 @@ async function request<T>(
   /** Set on the one retry after a refresh, so a dead session cannot loop. */
   isRetry = false,
 ): Promise<T> {
+  /*
+   * A FormData body is sent as it is.
+   *
+   * CRUCIALLY WITHOUT A Content-Type HEADER. Multipart needs a boundary token in
+   * that header, the browser generates one and appends it when it sees a
+   * FormData body, and setting `multipart/form-data` by hand produces a header
+   * with no boundary — which parses as a request with no parts at all. The bug
+   * reads as "the file never arrived" with nothing in it to point at the header.
+   */
+  const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
+
   const headers: Record<string, string> = { Accept: 'application/json' };
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (body !== undefined && !isForm) headers['Content-Type'] = 'application/json';
   if (options.version !== undefined) headers['If-Match'] = String(options.version);
   if (options.idempotencyKey) headers['Idempotency-Key'] = options.idempotencyKey;
 
@@ -190,7 +201,7 @@ async function request<T>(
       method,
       headers,
       credentials: 'same-origin',
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : isForm ? (body as FormData) : JSON.stringify(body),
       signal: options.signal,
     });
   } catch (cause) {

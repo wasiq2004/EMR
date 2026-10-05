@@ -149,6 +149,31 @@ export class PatientsService {
   }
 
   async register(input: Record<string, unknown>): Promise<Patient> {
+    const idempotencyKey = (input.idempotencyKey as string | null | undefined) ?? null;
+
+    /*
+     * A RETRY RETURNS THE PATIENT IT ALREADY CREATED.
+     *
+     * Checked BEFORE the search token, and the order is the whole point of this
+     * block. The token is single-use — `searchTokens.delete` below — so a second
+     * identical submit was already refused, which meant a double-tap never did
+     * create two patients. But it was refused with "search for the patient
+     * before creating a new record", to a receptionist who had just done exactly
+     * that, and who still did not know whether the first attempt had worked. The
+     * honest answer to "I pressed it twice" is the record, not a lecture.
+     */
+    if (idempotencyKey) {
+      const already = await this.tenantDb.runReadOnly(async (tx) => {
+        const [found] = await tx
+          .select()
+          .from(schema.patient)
+          .where(eq(schema.patient.idempotencyKey, idempotencyKey))
+          .limit(1);
+        return found;
+      });
+      if (already) return already as unknown as Patient;
+    }
+
     const token = input.searchToken as string | undefined;
     const expiry = token ? searchTokens.get(token) : undefined;
 
@@ -192,6 +217,7 @@ export class PatientsService {
           emergencyContactRelation: (input.emergencyContactRelation as string) ?? null,
           tags: (input.tags as string[]) ?? [],
           notes: (input.notes as string) ?? null,
+          idempotencyKey,
           createdBy: ctx.userId,
           updatedBy: ctx.userId,
         })

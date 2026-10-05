@@ -401,6 +401,13 @@ export class PharmacyController {
     };
   }
 
+  /** One sale with its lines, and what is still returnable on each. */
+  @RequirePermission('pharmacySale:read')
+  @Get('sales/:id')
+  saleDetail(@Param('id') id: string) {
+    return this.sales.saleDetail(requireUuid(id, 'Sale'));
+  }
+
   /** Prices a completed dispense so the counter can charge it in one step. */
   @RequirePermission('pharmacySale:read')
   @Get('queue/:id/quote')

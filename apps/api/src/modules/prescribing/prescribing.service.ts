@@ -291,6 +291,89 @@ export class PrescribingService {
     });
   }
 
+  /**
+   * Adds a drug this clinic stocks that the shared catalogue does not have.
+   *
+   * Under the clinic's OWN tenant. The shared rows belong to a reserved tenant
+   * that no clinic can write to — migration `0013` asserts that no write policy
+   * admits it — so one clinic adding "Mox 500" cannot change what every other
+   * clinic on the deployment sees.
+   *
+   * `catalogueVersion` is 'clinic' rather than a release identifier, which is
+   * how a prescription written against it later reads as having come from the
+   * clinic's own list rather than from a formulary release.
+   */
+  async addToCatalogue(input: {
+    brandName?: string | null;
+    moleculeName: string;
+    strength?: string | null;
+    dosageForm?: string | null;
+    route?: string | null;
+    manufacturer?: string | null;
+    drugSchedule?: 'H' | 'H1' | 'X' | null;
+  }) {
+    const ctx = TenantContext.require();
+
+    const searchNormalized = [input.brandName ?? '', input.moleculeName, input.strength ?? '']
+      .join(' ')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return this.tenantDb.run(async (tx) => {
+      /*
+       * Already present is not an error.
+       *
+       * Two doctors in the same clinic reaching for the same missing drug on the
+       * same morning is the expected case, not a conflict either of them should
+       * have to resolve. Matched on the normalised search text rather than on
+       * the brand, so "Mox 500" and "mox  500" are the same row.
+       */
+      const [existing] = await tx
+        .select()
+        .from(schema.drugCatalogueItem)
+        .where(
+          and(
+            eq(schema.drugCatalogueItem.clinicId, ctx.clinicId),
+            eq(schema.drugCatalogueItem.searchNormalized, searchNormalized),
+          ),
+        )
+        .limit(1);
+      if (existing) return existing;
+
+      const [created] = await tx
+        .insert(schema.drugCatalogueItem)
+        .values({
+          clinicId: ctx.clinicId,
+          brandName: input.brandName ?? null,
+          moleculeName: input.moleculeName,
+          searchNormalized,
+          strength: input.strength ?? null,
+          dosageForm: input.dosageForm ?? null,
+          route: input.route ?? null,
+          manufacturer: input.manufacturer ?? null,
+          /*
+           * Null rather than a default of 'H'.
+           *
+           * The seeded list defaults to H because every drug on it was checked.
+           * A clinic's own row has not been, and claiming a schedule nobody
+           * verified is worse than claiming none: Schedule X carries a
+           * telemedicine prohibition the server enforces, and a wrong value
+           * either blocks a legitimate prescription or waves through one the law
+           * forbids.
+           */
+          drugSchedule: input.drugSchedule ?? null,
+          isNarcotic: input.drugSchedule === 'X',
+          catalogueVersion: 'clinic',
+          createdBy: ctx.userId,
+          updatedBy: ctx.userId,
+        })
+        .returning();
+
+      return created!;
+    });
+  }
+
   async removeLine(lineId: string): Promise<void> {
     await this.tenantDb.run(async (tx) => {
       const [line] = await tx

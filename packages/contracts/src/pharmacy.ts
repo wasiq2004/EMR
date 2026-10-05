@@ -381,6 +381,14 @@ export const ReceiveGoods = z.object({
   supplierInvoiceDate: IsoDate.nullish(),
   notes: z.string().trim().nullish(),
   lines: z.array(ReceiveGoodsLine).min(1, 'Record at least one line'),
+  /**
+   * Required, and non-empty.
+   *
+   * A retried request must not repeat this. An empty string is not null, so the
+   * database's partial unique index would treat it as a real key and the first
+   * empty-keyed row in a clinic would block every one after it.
+   */
+  idempotencyKey: z.string().min(8, 'This operation needs a unique key'),
 });
 export type ReceiveGoods = z.infer<typeof ReceiveGoods>;
 
@@ -596,6 +604,14 @@ export const RecordSale = z.object({
   discountReason: z.string().trim().nullish(),
   paymentMethod: PaymentMethod,
   paidPaise: Paise.min(0),
+  /**
+   * Required, and non-empty.
+   *
+   * A retried request must not repeat this. An empty string is not null, so the
+   * database's partial unique index would treat it as a real key and the first
+   * empty-keyed row in a clinic would block every one after it.
+   */
+  idempotencyKey: z.string().min(8, 'This operation needs a unique key'),
 });
 export type RecordSale = z.infer<typeof RecordSale>;
 

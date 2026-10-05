@@ -28,6 +28,7 @@ import { usePatient, usePatientSnapshot } from '@/features/patients/api';
 import { RecordVitalsDialog } from '@/features/patients/record-vitals-dialog';
 import { useReminderSettings } from '@/features/reminders/api';
 import { OrderTestPanel } from '@/features/lab/order-test-panel';
+import { AddDrugDialog } from '@/features/encounter/add-drug-dialog';
 import { VitalsGrid } from '@/features/patients/vitals-grid';
 import { AllergyBanner } from '@/features/patients/allergy-banner';
 import { DiagnosisCombobox } from '@/features/encounter/diagnosis-combobox';
@@ -198,6 +199,15 @@ export default function ConsultationPage() {
   })();
 
   const canOrderLabs = useCan('labOrder:create');
+  /*
+   * Adding to the clinic's drug list is configuration, not clinical work.
+   *
+   * `clinic:update`, which is what the API gates `POST /drugs` on. A doctor
+   * without it still gets "prescribe as typed" — the thing they need mid
+   * consultation — and simply is not offered the keep-it row.
+   */
+  const canAddDrugs = useCan('clinic:update');
+  const [addingDrug, setAddingDrug] = React.useState<string | null>(null);
   const allergies: Allergy[] = snapshot.data?.allergies ?? [];
   const finalised = encounter.data?.isFinalized ?? false;
   const readOnly = finalised || !canWriteClinical;
@@ -630,6 +640,7 @@ export default function ConsultationPage() {
                       )
                     }
                     onFreeText={(name) => considerDrug(name, null, null)}
+                onAddToCatalogue={canAddDrugs ? setAddingDrug : undefined}
                   />
                 ) : null}
 
@@ -756,6 +767,19 @@ export default function ConsultationPage() {
           }}
         />
       ) : null}
+
+      <AddDrugDialog
+        open={addingDrug !== null}
+        typed={addingDrug ?? ''}
+        onClose={() => setAddingDrug(null)}
+        /*
+         * Straight on to prescribing it after it is kept. The doctor reached for
+         * this mid-prescription; making them search again for the thing they
+         * just typed in would be the kind of step that teaches people to use
+         * free text instead.
+         */
+        onAdded={(name) => considerDrug(name, null, null)}
+      />
 
       <DosageDialog
         open={dosing !== null}

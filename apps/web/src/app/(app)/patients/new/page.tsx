@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { AlertTriangle, ArrowLeft, Search, UserCheck, UserPlus } from 'lucide-react';
 import { normalisePhone, type PatientSummary } from '@emr/contracts';
 import { useDuplicateCheck, useRegisterPatient } from '@/features/patients/api';
+import { idempotencyKey } from '@/lib/api-client';
 import { ageGender, formatDate, formatPhone } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -290,6 +291,25 @@ function RegistrationForm({
   const register = useRegisterPatient();
   const toast = useToast();
 
+  /*
+   * ONE KEY PER REGISTRATION, held across attempts.
+   *
+   * This form gets submitted twice for an ordinary reason: the first attempt
+   * fails on a validation message, the receptionist corrects a field and presses
+   * again. Those are the SAME registration and share the key — nothing was
+   * stored by the failed attempt, so the corrected submit proceeds normally.
+   *
+   * What the key stops is the other case: a submit that SUCCEEDED and whose
+   * response never arrived. Pressing again used to return "search for the
+   * patient before creating a new record" — the search token having been
+   * consumed — which told a receptionist who had just searched nothing about
+   * whether the patient now existed. It returns the patient now.
+   *
+   * Minted once per mount, not inside the handler. A key generated per press is
+   * a new value each time and protects nothing.
+   */
+  const registrationKey = React.useRef(idempotencyKey());
+
   const [fullName, setFullName] = React.useState(prefillName);
   const [gender, setGender] = React.useState('FEMALE');
   const [ageYears, setAgeYears] = React.useState('');
@@ -337,6 +357,7 @@ function RegistrationForm({
         notes: notes || null,
         searchToken,
         duplicateOverrideReason: needsOverride ? overrideReason.trim() : null,
+        idempotencyKey: registrationKey.current,
       });
       onRegistered(patient.id, patient.fullName);
     } catch (cause) {

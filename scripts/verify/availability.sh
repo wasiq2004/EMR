@@ -376,6 +376,93 @@ login owner@$VERIFY_DOMAIN
 req POST "/availability/schedules/$CSCHED/remove"
 check "clean up the session" 201 "$CODE" "$BODY"
 
+echo "-- the front desk cannot do things twice --"
+#
+# Three endpoints took an `Idempotency-Key` HEADER from the web client and all
+# three ignored it: nothing on the server read that header, and neither table
+# had a column to put a key in. The call sites looked careful and were not.
+#
+# A reception desk is the worst place for an at-least-once write — the first tap
+# does not visibly do anything so the terminal gets tapped again, or the request
+# times out and the receptionist retries with a patient standing there.
+login reception@$VERIFY_DOMAIN
+
+# $DOCTOR and $PATIENT were resolved earlier in this suite.
+# A booking a fortnight out, so it cannot collide with the slots the rest of
+# this suite books.
+IDEM_DAY=$(node -e 'const d=new Date();d.setUTCDate(d.getUTCDate()+14);console.log(d.toISOString().slice(0,10))')
+AKEY=$(node -e 'console.log(require("crypto").randomUUID())')
+BOOKING="{\"patientId\":\"$PATIENT\",\"practitionerId\":\"$DOCTOR\",\"scheduledStart\":\"${IDEM_DAY}T05:30:00.000Z\",\"idempotencyKey\":\"$AKEY\"}"
+
+req POST /appointments "$BOOKING"
+check "book an appointment" 201 "$CODE" "$BODY"
+FIRST_APPT=$(printf '%s' "$BODY" | grep -o '"id":"[0-9a-f-]\{36\}"' | head -1 | cut -d'"' -f4)
+
+# THE SAME REQUEST AGAIN. Same key, same everything — a retry after a timeout.
+req POST /appointments "$BOOKING"
+check "the same booking again is accepted" 201 "$CODE" "$BODY"
+check "and returns the original, not a second slot" "$FIRST_APPT" "$(printf '%s' "$BODY" | grep -o '"id":"[0-9a-f-]\{36\}"' | head -1 | cut -d'"' -f4)" "$BODY"
+
+# The doctor's day must not look fuller than it is.
+req GET "/appointments?from=$IDEM_DAY&to=$IDEM_DAY"
+BOOKED=$(printf '%s' "$BODY" | grep -o "\"id\":\"$FIRST_APPT\"" | wc -l | tr -d ' ')
+check "the appointment appears once on the day" 1 "$BOOKED" "$BODY"
+
+# A DIFFERENT KEY IS A DIFFERENT BOOKING. The guarantee must not be so broad
+# that a genuine second appointment is swallowed.
+req POST /appointments "{\"patientId\":\"$PATIENT\",\"practitionerId\":\"$DOCTOR\",\"scheduledStart\":\"${IDEM_DAY}T06:30:00.000Z\",\"idempotencyKey\":\"$(node -e 'console.log(require("crypto").randomUUID())')\"}"
+check "a genuine second booking goes through" 201 "$CODE" "$BODY"
+
+# No key at all is SERVED, not refused. Unlike a payment or a stock receipt, a
+# duplicate appointment is a mess somebody can cancel rather than money that
+# moved — so an integration without a key is simply unprotected.
+req POST /appointments "{\"patientId\":\"$PATIENT\",\"practitionerId\":\"$DOCTOR\",\"scheduledStart\":\"${IDEM_DAY}T07:30:00.000Z\"}"
+check "a booking with no key is still accepted" 201 "$CODE" "$BODY"
+
+echo "-- a walk-in shares the key space with a booking --"
+# Both write `appointment`, and one index covers both: a key minted for a
+# booking must not be reusable to add a walk-in.
+req POST /queue "{\"patientId\":\"$PATIENT\",\"practitionerId\":\"$DOCTOR\",\"idempotencyKey\":\"$AKEY\"}"
+check "reusing a booking's key returns that booking" 201 "$CODE" "$BODY"
+check "rather than queueing anybody" "$FIRST_APPT" "$(printf '%s' "$BODY" | grep -o '"id":"[0-9a-f-]\{36\}"' | head -1 | cut -d'"' -f4)" "$BODY"
+
+WKEY=$(node -e 'console.log(require("crypto").randomUUID())')
+WALKIN="{\"patientId\":\"$PATIENT\",\"practitionerId\":\"$DOCTOR\",\"idempotencyKey\":\"$WKEY\"}"
+req POST /queue "$WALKIN"
+check "add a walk-in" 201 "$CODE" "$BODY"
+FIRST_WALKIN=$(printf '%s' "$BODY" | grep -o '"id":"[0-9a-f-]\{36\}"' | head -1 | cut -d'"' -f4)
+
+req POST /queue "$WALKIN"
+check "the same walk-in again is accepted" 201 "$CODE" "$BODY"
+check "and returns the original" "$FIRST_WALKIN" "$(printf '%s' "$BODY" | grep -o '"id":"[0-9a-f-]\{36\}"' | head -1 | cut -d'"' -f4)" "$BODY"
+
+req GET /queue
+QUEUED=$(printf '%s' "$BODY" | grep -o "\"id\":\"$FIRST_WALKIN\"" | wc -l | tr -d ' ')
+check "and the patient is in the queue once" 1 "$QUEUED" "$BODY"
+
+echo "-- registering the same patient twice --"
+# The search token is single-use, so a second submit was ALREADY refused — with
+# "search for the patient before creating a new record", to somebody who had
+# just searched and still could not tell whether the first attempt had worked.
+req GET '/patients/duplicates?mobile=+919000000311&name=Idempotent+Patient'
+STOKEN=$(printf '%s' "$BODY" | grep -o '"searchToken":"[^"]*"' | head -1 | cut -d'"' -f4)
+PKEY=$(node -e 'console.log(require("crypto").randomUUID())')
+NEWPATIENT="{\"fullName\":\"Idempotent Patient $RANDOM\",\"mobileE164\":\"+919000000311\",\"gender\":\"FEMALE\",\"ageYears\":31,\"searchToken\":\"$STOKEN\",\"idempotencyKey\":\"$PKEY\"}"
+
+req POST /patients "$NEWPATIENT"
+check "register a patient" 201 "$CODE" "$BODY"
+FIRST_PATIENT=$(printf '%s' "$BODY" | grep -o '"id":"[0-9a-f-]\{36\}"' | head -1 | cut -d'"' -f4)
+PNAME=$(printf '%s' "$BODY" | grep -o '"fullName":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+# The retry returns the record rather than a lecture about searching first.
+req POST /patients "$NEWPATIENT"
+check "the same registration again is accepted" 201 "$CODE" "$BODY"
+check "and returns the patient that was created" "$FIRST_PATIENT" "$(printf '%s' "$BODY" | grep -o '"id":"[0-9a-f-]\{36\}"' | head -1 | cut -d'"' -f4)" "$BODY"
+
+req GET "/patients?q=$(printf '%s' "$PNAME" | tr ' ' '+')"
+ONCE=$(printf '%s' "$BODY" | grep -o "\"id\":\"$FIRST_PATIENT\"" | wc -l | tr -d ' ')
+check "the register holds them once" 1 "$ONCE" "$BODY"
+
 echo
 echo "  $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

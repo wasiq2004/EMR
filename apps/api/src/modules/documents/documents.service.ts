@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, or, sql } from 'drizzle-orm';
 import * as schema from '@emr/db/schema';
-import type { ClinicalDocument } from '@emr/contracts';
+import type { ClinicalDocument, DocumentType } from '@emr/contracts';
 import { TenantDb } from '../../common/tenancy/tenant-db.service';
 import { TenantContext } from '../../common/tenancy/tenant-context';
 import { StorageService } from '../../common/storage/storage.service';
@@ -68,7 +68,7 @@ export class DocumentsService {
   async upload(input: {
     patientId: string;
     encounterId?: string | null;
-    documentType: string;
+    documentType: DocumentType;
     title: string;
     mimeType: string;
     body: Buffer;
@@ -85,7 +85,7 @@ export class DocumentsService {
           clinicId: ctx.clinicId,
           patientId: input.patientId,
           encounterId: input.encounterId ?? null,
-          documentType: input.documentType as 'LAB_REPORT',
+          documentType: input.documentType,
           title: input.title,
           objectKey,
           mimeType: input.mimeType,
