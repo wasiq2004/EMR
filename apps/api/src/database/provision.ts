@@ -10,7 +10,16 @@
  *     --name "Sunrise Family Clinic" \
  *     --slug sunrise \
  *     --admin-email owner@sunriseclinic.in \
- *     --admin-name "Vikram Rao"
+ *     --admin-name "Vikram Rao" \
+ *     --all-modules
+ *
+ * `--all-modules` is for a SELF-HOSTED single-clinic install: it writes a
+ * per-clinic override turning every optional module on, so neither a plan nor
+ * the operations console is needed. WITHOUT it the clinic has no plan, and
+ * `FeatureGuard` resolves every optional module to off — billing, documents,
+ * WhatsApp, pharmacy, lab, analytics and import/export. The command now says
+ * which of the two happened, rather than leaving it to be discovered by a
+ * member of staff being told to contact their administrator.
  *
  * It prints a one-time password rather than emailing one, because no mail
  * provider is connected. Saying so plainly beats pretending a mail was sent —
@@ -28,6 +37,7 @@ import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import * as schema from '@emr/db/schema';
+import { FEATURE_KEYS, allFeaturesOn } from '@emr/contracts';
 
 interface Options {
   name: string;
@@ -42,10 +52,22 @@ interface Options {
   state?: string;
   pincode?: string;
   contactPhoneE164?: string;
+  /**
+   * Turn every optional module on, as a per-clinic override.
+   *
+   * For a self-hosted single-clinic install, where there is no price list and no
+   * operations console in use. An EXPLICIT choice, never a default: a clinic
+   * silently given modules nobody bought is the one direction the feature
+   * registry exists to prevent.
+   */
+  allModules: boolean;
 }
 
 function parseArgs(argv: string[]): Options {
   const values = new Map<string, string>();
+  // Bare flags, which take no value. Collected separately because a flag with
+  // nothing after it would otherwise be dropped silently.
+  const flags = new Set<string>();
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (!arg?.startsWith('--')) continue;
@@ -54,6 +76,8 @@ function parseArgs(argv: string[]): Options {
     if (next && !next.startsWith('--')) {
       values.set(key, next);
       i += 1;
+    } else {
+      flags.add(key);
     }
   }
 
@@ -91,6 +115,7 @@ function parseArgs(argv: string[]): Options {
     state: values.get('state'),
     pincode: values.get('pincode'),
     contactPhoneE164: values.get('phone'),
+    allModules: flags.has('all-modules'),
   };
 }
 
@@ -166,6 +191,35 @@ async function main() {
         [clinicId, options.adminName, options.adminEmail, passwordHash],
       );
 
+      /*
+       * A SUBSCRIPTION ROW, ALWAYS — and this used to be missing entirely.
+       *
+       * `FeatureGuard` resolves a clinic with no subscription to every feature
+       * flag FALSE. So a clinic created by this command — the command the header
+       * above calls "the only way into a fresh deployment" — came up with
+       * billing, reports, documents, WhatsApp, broadcasts, pharmacy, lab,
+       * analytics and import/export all switched off, and nothing said so. The
+       * first person to find out is whichever member of staff lands on a gated
+       * screen and is told to contact their administrator.
+       *
+       * An absent row and a deliberate empty plan were indistinguishable. The
+       * row makes the commercial state explicit, and `--all-modules` is how a
+       * self-hosted single-clinic install says "there is no price list here,
+       * turn everything on" — as an explicit choice rather than a default,
+       * because granting modules nobody bought is the one direction the feature
+       * registry exists to prevent.
+       */
+      await client.query(
+        `INSERT INTO subscription (clinic_id, plan_id, plan, status,
+                                   monthly_price_paise, feature_overrides)
+         VALUES ($1, NULL, $2, 'TRIAL', 0, $3::jsonb)`,
+        [
+          clinicId,
+          options.allModules ? 'self-hosted' : 'unassigned',
+          JSON.stringify(options.allModules ? allFeaturesOn() : {}),
+        ],
+      );
+
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -183,6 +237,27 @@ async function main() {
     console.log('');
     console.log('  Read it out rather than sending it, and change it on first sign-in.');
     console.log('  It is not stored anywhere in plaintext and cannot be shown again.');
+    console.log('');
+
+    /*
+     * The module state, said plainly.
+     *
+     * Printing "clinic created" and stopping is what made the featureless case
+     * invisible. Whoever runs this is the only person who can fix it, and this
+     * is the only moment they are looking.
+     */
+    if (options.allModules) {
+      console.log(`  Modules:        all ${FEATURE_KEYS.length} on (--all-modules).`);
+      console.log('                  Written as a per-clinic override, so no plan is needed.');
+    } else {
+      console.log('  Modules:        NONE. This clinic has no plan, so billing, documents,');
+      console.log('                  WhatsApp, pharmacy, lab, analytics and import/export are');
+      console.log('                  all off. Staff reaching those screens will be told to');
+      console.log('                  contact their administrator.');
+      console.log('');
+      console.log('                  Re-run with --all-modules for a self-hosted install, or');
+      console.log('                  assign a plan from the operations console.');
+    }
     console.log('');
   } finally {
     await pool.end();

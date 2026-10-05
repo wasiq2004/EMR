@@ -954,6 +954,113 @@ entry exists.
       row refused, idempotent re-adding, the clinic's own drug searchable and
       prescribable, and the schedule stored null rather than guessed.
 
+## Super Admin from the environment, at deploy time — 2026-10-06
+
+Asked for: the Super Admin credential in `.env`, used automatically on deploy.
+
+- [x] **`bootstrap-operator.ts`**, run as the last step of the migrate job:
+      `migrate.js && seed.js && bootstrap-operator.js`. Reads
+      `PLATFORM_ADMIN_EMAIL`, `PLATFORM_ADMIN_NAME`, `PLATFORM_ADMIN_PASSWORD`
+      and `PLATFORM_ADMIN_ROLE`.
+
+      It exists alongside `provision-operator.ts` rather than replacing it. That
+      one is the interactive CLI — it generates a password and prints it once,
+      which is right when somebody is at a terminal and useless on a PaaS host
+      where there is no terminal and no convenient way to run a one-off command.
+
+      **CREATE-ONLY, and that is the whole safety property of running on every
+      deploy.** If the account exists, the password in the environment is NOT
+      applied and the row is untouched. Otherwise changing the password in the
+      console would be silently undone by the next `git push`, and the value in
+      the env file would be the real credential forever. A redeploy is not a
+      password rotation.
+
+      **A placeholder or weak password FAILS THE DEPLOY** with a non-zero exit.
+      Better a deployment that stops with a clear message than a live platform
+      super-admin on a password copied out of `.env.example`. Unset is a
+      supported no-op that says so in the log, so a deployment that provisions
+      by hand keeps working; one of the two set is a loud error, because
+      guessing which half was meant is worse than stopping.
+- [x] **Fixed a flaw in my own check before shipping it.** The placeholder guard
+      started as an exact-match set, and every entry on it was under twelve
+      characters — so the length check rejected them first and the list never
+      fired once. Worse, the realistic placeholder is not `changeme` but
+      `ChangeMe123456`, long enough to pass a length check and exactly as
+      guessable. Now substring stems matched after stripping case and
+      punctuation, checked BEFORE the length rule so the error says "that is a
+      placeholder" rather than inviting someone to pad it to length. Verified
+      that `ChangeMe123456` and `SuperAdmin@1234` are both refused, and that the
+      generated password trips nothing.
+- [x] **`.env.example` carries the keys with NO password**, and says why: a
+      committed default is a known way in for anyone who has cloned the repo.
+      **`.env`** (gitignored, untracked — checked) has the real values with a
+      freshly generated 16-character secret.
+- [x] **Verified end to end against the running stack**, not just typechecked:
+      the env password creates an operator that signs in at
+      `POST /platform/auth/login` (201) and a wrong one is refused (401); a
+      redeploy carrying a *different* env password leaves the stored argon2 hash
+      byte-identical; placeholder, short and low-entropy passwords each exit 1;
+      unset is a clean no-op. Test operators removed afterwards.
+
+      One honest limit: the password is at rest in plaintext on whatever host
+      holds the file, Dokploy's own environment store included. That is the
+      trade for deploying without a terminal. Changing it in the console after
+      the first sign-in makes the env value inert, which is what the log line
+      tells the operator to do.
+
+## A fresh deployment has no way in — 2026-10-06
+
+Reported after deploying with Dokploy: no credential for the Super Admin
+(operations console) panel. **Correct, and by design — but the design has a
+hole next to it.**
+
+`docker-compose.yml` runs `migrate.js && seed.js` and nothing else, and the
+comment on the service says what the seed does: the shared drug catalogue and
+"NOTHING else — no clinics, no patients, no accounts". `provision-operator.ts`
+says the same: "The operations console has no self-service sign-up and no
+default account, so this is the only way one comes to exist... an account that
+ships with the software is an account everyone knows about."
+
+That part is right and stays. Both scripts DO ship in the runner image
+(`dist/database/provision-operator.js`, `dist/database/provision.js`), and both
+run in it — verified, argon2 and pg resolve.
+
+- [x] **`provision.ts` created a clinic with NO subscription row.** This is the
+      hole, and it is on the path its own header calls "the only way into a
+      fresh deployment". `FeatureGuard` resolves a clinic with no subscription
+      to every flag false, so a freshly provisioned clinic came up with billing,
+      reports, documents, WhatsApp, broadcasts, pharmacy, lab, analytics and
+      import/export all off, and nothing said so.
+
+      **Reproduced live before fixing**: provisioning a clinic through the
+      shipped image left `has_sub = f`. After the fix, a subscription row is
+      always written, and `--all-modules` writes a per-clinic override turning
+      all eleven on — verified landing in the database as `self-hosted` with
+      pharmacy, lab and analytics true.
+
+      `--all-modules` is an EXPLICIT flag, never a default, because a clinic
+      silently given modules nobody bought is the one direction the feature
+      registry exists to prevent. It exists because a self-hosted single-clinic
+      install has no price list and no console in use, and making that operator
+      create a plan to get a working clinic is ceremony with no customer behind
+      it.
+
+      The command now PRINTS which of the two happened. Printing "clinic
+      created" and stopping is what made the featureless case invisible, and
+      whoever runs it is both the only person who can fix it and the only person
+      looking at that moment.
+
+      The arg parser also gained bare-flag support — it only collected
+      `--key value` pairs, so `--all-modules` with nothing after it would have
+      been dropped silently.
+- [x] **Nothing seeds the plan catalogue**, which matters for the order of
+      operations on a fresh server: the only code that creates a plan is the
+      console's own Plans screen. So a new deployment has an empty `plan` table,
+      and onboarding a clinic through the console has no plan to attach — which
+      lands in the `unassigned` case above. Documented in the bootstrap sequence
+      rather than "fixed", because inventing a default price list is not a
+      decision to make in a migration.
+
 ## "The pharmacist is told to contact the admin" — 2026-10-06
 
 Diagnosed against the live database, not guessed. **The pharmacist account was

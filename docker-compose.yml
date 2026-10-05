@@ -96,7 +96,24 @@ services:
       WORKER_DB_PASSWORD: ${WORKER_DB_PASSWORD:-}
       PLATFORM_DB_PASSWORD: ${PLATFORM_DB_PASSWORD:-}
       READONLY_DB_PASSWORD: ${READONLY_DB_PASSWORD:-}
-    command: ['sh', '-c', 'node dist/database/migrate.js && node dist/database/seed.js']
+      # The first operations-console account, created here so a deployment with
+      # no terminal attached — Dokploy, Coolify, CI — comes up with a console
+      # somebody can sign into. CREATE-ONLY: if the account already exists its
+      # password is left alone, because a redeploy must not silently undo a
+      # rotation done in the console. Unset both and nothing is created.
+      PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-}
+      PLATFORM_ADMIN_NAME: ${PLATFORM_ADMIN_NAME:-}
+      PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:-}
+      PLATFORM_ADMIN_ROLE: ${PLATFORM_ADMIN_ROLE:-PLATFORM_ADMIN}
+    # Ordered, and the order is the point: migrate creates the tables, seed
+    # fills the shared catalogue, and only then is there a platform_user table
+    # to write an operator into. `&&` so a failed migration stops the rest.
+    command:
+      [
+        'sh',
+        '-c',
+        'node dist/database/migrate.js && node dist/database/seed.js && node dist/database/bootstrap-operator.js',
+      ]
 
   # ---------------------------------------------------------------------------
   # API
