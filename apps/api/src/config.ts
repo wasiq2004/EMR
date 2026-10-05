@@ -97,6 +97,13 @@ const Env = z.object({
 
   PUBLIC_BASE_URL: z.string().default('http://localhost:3000'),
   CORS_ORIGINS: z.string().default('http://localhost:3000'),
+  /**
+   * Extra hostnames that are the app rather than a clinic subdomain.
+   *
+   * Comma-separated. Usually unnecessary — PUBLIC_BASE_URL and CORS_ORIGINS
+   * already name the host the browser uses, and both are read for this.
+   */
+  APP_HOSTS: z.string().default(''),
 });
 
 const parsed = Env.safeParse(process.env);
@@ -108,14 +115,90 @@ if (!parsed.success) {
   throw new Error(`Configuration is not valid:\n${problems}`);
 }
 
+/**
+ * The hostname out of a URL, or null if it is not one.
+ *
+ * Tolerant on purpose: these values are typed into an environment file by hand,
+ * and a bare `emr.example.com` with no scheme is a reasonable thing to write.
+ * Returning null for junk is correct — the caller treats "not a known app host"
+ * as "this might be a clinic subdomain", which is the pre-existing behaviour.
+ */
+function hostOf(value: string): string | null {
+  if (!value) return null;
+  try {
+    return new URL(value.includes('://') ? value : `https://${value}`).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
 export const config = {
   ...parsed.data,
   isProduction: parsed.data.NODE_ENV === 'production',
   corsOrigins: parsed.data.CORS_ORIGINS.split(',').map((origin) => origin.trim()),
+
+  /**
+   * Hostnames that are THIS APPLICATION rather than a clinic's subdomain.
+   *
+   * Sign-in reads the clinic from the first label of the host, because the
+   * product is addressed as `{clinic-slug}.yourdomain.com`. That is right for a
+   * multi-tenant estate and WRONG for the commonest deployment of all — one
+   * clinic on one domain, `emr.example.com` — where the first label is the
+   * app's own name and matches no clinic. The resolver then filters on a slug
+   * that does not exist, finds nobody, and sign-in reports "that email and
+   * password do not match", which sends whoever is holding a correct password
+   * looking for a problem with the password.
+   *
+   * Derived from PUBLIC_BASE_URL and APP_HOSTS rather than being a new setting
+   * nobody knows to set: the deployment has already had to say where the
+   * browser reaches it, and that is the same fact. APP_HOSTS exists for the
+   * cases that answer does not cover — a second domain, an internal name, a
+   * health-check host.
+   */
+  appHosts: [
+    ...parsed.data.APP_HOSTS.split(',').map((host) => host.trim().toLowerCase()),
+    hostOf(parsed.data.PUBLIC_BASE_URL),
+    ...parsed.data.CORS_ORIGINS.split(',').map((origin) => hostOf(origin.trim())),
+  ].filter((host): host is string => Boolean(host)),
 };
 
 if (config.isProduction && config.JWT_SECRET.startsWith('development-only')) {
   throw new Error('JWT_SECRET must be set to a real secret in production.');
+}
+
+/*
+ * PUBLIC_BASE_URL left at its development default, in production.
+ *
+ * WARNED, NOT THROWN. It is wrong in every production deployment, but refusing
+ * to boot over it would take a running clinic down on an upgrade for something
+ * that is not a security property — and the default is what somebody who copied
+ * `.env.example` and changed only the secrets will have.
+ *
+ * It breaks two things, neither of which announces itself:
+ *
+ *   - SIGN-IN, because `appHosts` is derived from this. The real host is then
+ *     not recognised as the application's own, its first label is read as a
+ *     clinic slug, the resolver matches no clinic, and the user is told "that
+ *     email and password do not match" while holding a correct password.
+ *   - SHARE LINKS, which are built from it, so every OTP link a clinic sends a
+ *     patient points at the recipient's own machine.
+ */
+if (
+  config.isProduction &&
+  /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(config.PUBLIC_BASE_URL)
+) {
+  console.error(
+    [
+      `  PUBLIC_BASE_URL is still ${config.PUBLIC_BASE_URL} in production.`,
+      "    Sign-in will refuse correct passwords: the real hostname is not",
+      "    recognised as this application's, so its first label is read as a",
+      "    clinic slug, matches no clinic, and the user is told their email and",
+      "    password do not match while holding a correct one.",
+      "    Share links will also point at the recipient's own machine.",
+      "    Set PUBLIC_BASE_URL and CORS_ORIGINS to the address the browser uses,",
+      "    for example https://emr.example.com",
+    ].join('\n'),
+  );
 }
 
 /*

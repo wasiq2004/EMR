@@ -954,6 +954,51 @@ entry exists.
       row refused, idempotent re-adding, the clinic's own drug searchable and
       prescribable, and the schedule stored null rather than guessed.
 
+## Sign-in refuses a correct password on a single-domain deployment — 2026-10-06
+
+Second report, after HTTPS was enabled. Now a real 401 with "That email and
+password do not match" — a correct password, refused.
+
+**The host was being read as a clinic slug.** `clinicSlugFrom` takes the first
+label of any hostname with three or more labels, because the product is
+addressed as `{clinic-slug}.yourdomain.com`. At `emr.nuvalyf.com` that yields
+`emr`, `auth_resolve_account` filters `c.slug = 'emr'`, no clinic has that slug,
+zero rows come back, and the caller refuses. Confirmed against the live
+database: 0 accounts resolve for slug `emr`.
+
+So the design assumed a multi-tenant estate with a subdomain per clinic, and
+broke on the commonest deployment there is — one clinic on one domain, where
+the first label is the application's own name. `www` and `app` were special-
+cased by hand, which shows the problem was half-seen: the real question is not
+"is this label one of two reserved words" but "is this host the application
+itself", and only the deployment can answer it.
+
+- [x] **The deployment already answers it, in `PUBLIC_BASE_URL`.** `config.appHosts`
+      is derived from it plus `CORS_ORIGINS`, with `APP_HOSTS` for the cases
+      those do not cover. A host on that list yields no slug, which means
+      "resolve by email across every clinic" — and that is not a loosening,
+      because `auth_resolve_account` returns at most two rows and the caller
+      refuses anything that is not exactly one. A single-domain deployment signs
+      in cleanly; an address shared by two clinics where one person has an
+      account at both is still refused rather than guessed at.
+- [x] **Moved the logic to its own module with no imports** (`clinic-host.ts`).
+      It lived in `auth.controller.ts`, which cannot be loaded without a
+      validated environment — `config.ts` throws at import time — so the one
+      piece of pure logic worth testing was unreachable from a test. **10 tests**
+      now cover it, including the regression and the multi-tenant case that must
+      not break.
+- [x] **A production warning for `PUBLIC_BASE_URL` left at localhost.** The fix
+      depends on that value being right, so a deployment that never changed it
+      stays broken in exactly the same way. Warned rather than thrown: it is not
+      a security property, and refusing to boot would take a running clinic down
+      on an upgrade over a default that someone who copied `.env.example` and
+      changed only the secrets will have.
+
+      **Both states proven against a production-mode container**, same request,
+      same credential: with `PUBLIC_BASE_URL=https://emr.nuvalyf.com` sign-in
+      returns **201**; with `http://localhost:3000` it returns **401** and the
+      startup log explains precisely why.
+
 ## "I created the clinic admin and cannot sign in" — 2026-10-06
 
 **Not a credentials problem. The site is served over plain HTTP.**

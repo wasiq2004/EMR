@@ -19,6 +19,7 @@ import {
   REFRESH_COOKIE,
 } from '../../common/tenancy/tenant-context.middleware';
 import { AuthService } from './auth.service';
+import { clinicSlugFromHost } from './clinic-host';
 
 type Cookied = FastifyRequest & { cookies?: Record<string, string> };
 
@@ -152,14 +153,7 @@ export class AuthController {
  */
 function clinicSlugFrom(req: FastifyRequest): string | null {
   const host = (req.headers['x-forwarded-host'] as string | undefined) ?? req.hostname;
-  if (!host) return null;
-
-  const [name] = host.split(':');
-  const labels = (name ?? '').split('.');
-  if (labels.length < 3) return null;
-
-  const first = labels[0]!;
-  return first === 'www' || first === 'app' ? null : first;
+  return clinicSlugFromHost(host, config.appHosts);
 }
 
 function setSessionCookies(
