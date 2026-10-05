@@ -108,11 +108,25 @@ services:
     # Ordered, and the order is the point: migrate creates the tables, seed
     # fills the shared catalogue, and only then is there a platform_user table
     # to write an operator into. `&&` so a failed migration stops the rest.
+    #
+    # THE `-f` TEST IS NOT DEFENSIVE CLUTTER. `api` waits on this job completing
+    # successfully, so anything that exits non-zero here keeps the whole clinic
+    # down. A host that pulls this compose file before it has rebuilt the image
+    # — which is the normal ordering on a PaaS, and what happened the first time
+    # this ran — would find no `bootstrap-operator.js`, exit MODULE_NOT_FOUND,
+    # and take the API with it.
+    #
+    # So the two failures are deliberately separated: a MISSING SCRIPT is a
+    # packaging mismatch that must not cost an outage, and is skipped with a
+    # line saying so. A script that RUNS and refuses — a placeholder password,
+    # a half-set configuration — still exits non-zero and still stops the
+    # deploy, because that one is a security condition and shipping past it is
+    # the thing worth preventing.
     command:
       [
         'sh',
         '-c',
-        'node dist/database/migrate.js && node dist/database/seed.js && node dist/database/bootstrap-operator.js',
+        'node dist/database/migrate.js && node dist/database/seed.js && if [ -f dist/database/bootstrap-operator.js ]; then node dist/database/bootstrap-operator.js; else echo "  Operations console: bootstrap-operator.js is not in this image, so no operator was created. Rebuild to enable it."; fi',
       ]
 
   # ---------------------------------------------------------------------------

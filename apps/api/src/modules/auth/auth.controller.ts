@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Logger,
   Post,
   Req,
   Res,
@@ -49,7 +50,7 @@ export class AuthController {
       userAgent: (req.headers['user-agent'] as string | undefined) ?? null,
     });
 
-    setSessionCookies(res, result.accessToken, result.refreshToken, result.refreshTtlSeconds);
+    setSessionCookies(req, res, result.accessToken, result.refreshToken, result.refreshTtlSeconds);
     return { mfaRequired: result.mfaRequired, session: result.session };
   }
 
@@ -82,7 +83,7 @@ export class AuthController {
     if (!token) throw new UnauthorizedException('Please sign in again.');
 
     const result = await this.auth.refresh(token);
-    setSessionCookies(res, result.accessToken, result.refreshToken, result.refreshTtlSeconds);
+    setSessionCookies(req, res, result.accessToken, result.refreshToken, result.refreshTtlSeconds);
     return { session: result.session };
   }
 
@@ -162,6 +163,7 @@ function clinicSlugFrom(req: FastifyRequest): string | null {
 }
 
 function setSessionCookies(
+  req: FastifyRequest,
   res: FastifyReply,
   accessToken: string,
   refreshToken: string,
@@ -173,6 +175,40 @@ function setSessionCookies(
     sameSite: 'lax' as const,
     path: '/',
   };
+
+  /*
+   * THE SILENT FAILURE THIS CATCHES, which cost most of an afternoon to
+   * diagnose from the outside:
+   *
+   * In production these cookies carry `Secure`, and a browser REFUSES TO STORE
+   * a Secure cookie on an insecure origin. It does not warn and it does not
+   * fail the request. So signing in over plain http returns 201 with a session
+   * in the response, the browser silently discards both cookies, every
+   * subsequent `/auth/me` arrives with no cookie and is correctly answered 401,
+   * and the app bounces back to the sign-in screen. From the outside it looks
+   * exactly like a wrong password — which is the one thing it is not.
+   *
+   * `req.protocol` is trustworthy here because `trustProxy` is on in main.ts, so
+   * it reflects `X-Forwarded-Proto` from the reverse proxy. That is the leg that
+   * matters: TLS terminating at Traefik and forwarding http to this container is
+   * the normal, correct arrangement and must NOT warn. Only a browser connected
+   * over http does.
+   *
+   * Logged rather than refused. Refusing the sign-in would take a clinic down
+   * over a proxy header, and a deployment behind something that strips
+   * X-Forwarded-Proto would be unusable with no way to override it.
+   */
+  if (base.secure && req.protocol !== 'https') {
+    new Logger('Auth').error(
+      'SESSION COOKIES WILL BE DISCARDED BY THE BROWSER. They are issued with ' +
+        '`Secure` because NODE_ENV=production, but this request arrived over ' +
+        `${req.protocol}, so no browser will store them — sign-in will appear to ` +
+        'succeed and every request after it will be 401. Serve this deployment ' +
+        'over HTTPS, and make sure the reverse proxy forwards ' +
+        '`X-Forwarded-Proto`. Also set PUBLIC_BASE_URL and CORS_ORIGINS to the ' +
+        'https origin, or share links will point somewhere that does not exist.',
+    );
+  }
 
   void res.setCookie(ACCESS_COOKIE, accessToken, {
     ...base,

@@ -954,6 +954,65 @@ entry exists.
       row refused, idempotent re-adding, the clinic's own drug searchable and
       prescribable, and the schedule stored null rather than guessed.
 
+## "I created the clinic admin and cannot sign in" — 2026-10-06
+
+**Not a credentials problem. The site is served over plain HTTP.**
+
+Diagnosed from the browser's own network tab: `POST /v1/auth/login` returns 201
+with a session, and then five consecutive `/v1/auth/me` calls return 401
+"Authentication required". Sign-in is working; the session cookie is not coming
+back.
+
+`setSessionCookies` issues both cookies with `secure: config.isProduction`, and
+compose sets `NODE_ENV=production`. **A browser refuses to store a `Secure`
+cookie on an insecure origin** — silently, with no warning and no failed
+request. So the cookies are set, discarded on arrival, and every request after
+that is correctly answered 401. From the outside it is indistinguishable from a
+wrong password, which is the one thing it is not.
+
+The fix is TLS, not relaxing the cookie. Dropping `Secure` would put session
+tokens for a medical record system in cleartext across the public internet,
+where anyone on the path can lift a doctor's session and read patient records.
+
+- [x] **Made the failure legible.** `setSessionCookies` now logs an ERROR when
+      it issues `Secure` cookies to a request that arrived over http, naming the
+      exact consequence: sign-in will appear to succeed and everything after it
+      will be 401.
+
+      `req.protocol` is trustworthy because `trustProxy` is already on, so it
+      reflects `X-Forwarded-Proto`. That distinction is the whole design of the
+      check: TLS terminating at Traefik and forwarding http to the container is
+      the normal, correct arrangement and must NOT warn — only a browser
+      connected over http does.
+
+      Logged rather than refused. Refusing the sign-in would take a clinic down
+      over a proxy header, and a deployment behind something that strips
+      `X-Forwarded-Proto` would be unusable with no override.
+
+      **Verified both ways against a production-mode container**: over plain
+      http the warning fires and reproduces the reported symptom exactly (201
+      then 401); with `X-Forwarded-Proto: https` it is silent — no false alarm.
+- [x] **Fixed a hazard I had just introduced.** Adding `bootstrap-operator.js`
+      to the migrate command meant that a host pulling the new compose file
+      before rebuilding the image got `MODULE_NOT_FOUND`, exit 1 — and because
+      `api` waits on `migrate` completing successfully, **the whole clinic stays
+      down**. Hit it on the first run here, which is how it was found.
+
+      The two failures are now separated: a MISSING SCRIPT is a packaging
+      mismatch that skips with a message and exits 0, while a script that runs
+      and REFUSES — placeholder password, half-set configuration — still exits
+      non-zero and still stops the deploy. Fail on the security condition, never
+      on a build-ordering race. Both paths verified.
+- [ ] **`PUBLIC_BASE_URL` and `CORS_ORIGINS` are still `http://localhost:3000`.**
+      Share links are built from the first, so every OTP link a clinic sends
+      currently points at the recipient's own machine. Both must be the https
+      origin on the server.
+
+### Note on the probe clinic
+`tls-probe` could not be deleted: `audit_event` is append-only and the trigger
+refuses a DELETE even from `emr_migrator`. That is the control working, so it
+was deactivated rather than worked around.
+
 ## Super Admin from the environment, at deploy time — 2026-10-06
 
 Asked for: the Super Admin credential in `.env`, used automatically on deploy.
