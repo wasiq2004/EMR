@@ -186,8 +186,9 @@ export function Field({
   const hintId = hint ? `${htmlFor}-hint` : undefined;
   const errorId = error ? `${htmlFor}-error` : undefined;
 
+  /* Always three children: label, control, footer. See the footer below. */
   return (
-    <div className={cn('flex flex-col gap-1.5', className)}>
+    <div data-field className={cn('flex flex-col gap-1.5', className)}>
       <Label htmlFor={htmlFor} required={required}>
         {label}
       </Label>
@@ -199,16 +200,75 @@ export function Field({
               [hintId, errorId].filter(Boolean).join(' ') || undefined,
           })
         : children}
-      {hint && !error ? (
-        <p id={hintId} className="text-2xs text-ink-faint">
-          {hint}
-        </p>
-      ) : null}
       {error ? (
+        /*
+         * The error REPLACES the hint rather than joining it. Showing both puts
+         * the sentence telling somebody what to do underneath the sentence
+         * telling them they got it wrong, and the lower one is the one that
+         * gets read.
+         */
         <p id={errorId} className="text-2xs font-medium text-critical">
           {error}
         </p>
-      ) : null}
+      ) : hint ? (
+        <p id={hintId} className="text-2xs text-ink-faint">
+          {hint}
+        </p>
+      ) : (
+        /*
+         * An empty third row. `subgrid` can only align fields against each
+         * other if every field contributes the same number of rows — a field
+         * that sometimes emits two and sometimes three would align on some
+         * rows of a form and not others, which reads as a bug rather than as
+         * no alignment at all. It has no content and no padding, so outside a
+         * FieldGrid it occupies nothing.
+         */
+        <span aria-hidden />
+      )}
+    </div>
+  );
+}
+
+/**
+ * A grid of fields whose labels, controls and hints line up across columns.
+ *
+ * THE BUG THIS EXISTS FOR. Put "Medical registration number" and "Medical
+ * council" side by side in a two-column grid at 640px and the first label
+ * wraps onto a second line while the second does not. Each cell is its own
+ * column of [label, control, hint], so the taller label pushes its input down
+ * and the two inputs sit on different baselines — a few pixels out, across a
+ * form somebody fills in twenty times a day.
+ *
+ * It is not fixable by shortening labels: the same form is used at 1366×768
+ * and on a tablet, and whichever width you tune the wording for, the other one
+ * wraps. `subgrid` removes the question — every field shares the grid's rows,
+ * so all labels occupy one row and all controls the next, aligned by
+ * construction.
+ *
+ * Use this anywhere two or more `Field`s sit side by side. A single-column
+ * stack does not need it.
+ */
+export function FieldGrid({
+  columns = 2,
+  className,
+  children,
+}: {
+  columns?: 1 | 2 | 3;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        'field-grid grid',
+        // Single column below `sm` regardless: two columns of inputs on a
+        // phone are narrower than the text they have to hold.
+        columns === 2 && 'sm:grid-cols-2',
+        columns === 3 && 'sm:grid-cols-2 lg:grid-cols-3',
+        className,
+      )}
+    >
+      {children}
     </div>
   );
 }

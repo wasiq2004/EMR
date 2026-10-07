@@ -292,6 +292,166 @@
 }
 
 @layer utilities {
+  /* ======================================================================
+   * Motion
+   *
+   * EVERY ANIMATION HERE MOVES ONLY `transform` AND `opacity`. Those two are
+   * the properties a browser can hand to the compositor, so they run off the
+   * main thread and cannot cause layout. Animating width, height, top or
+   * box-shadow instead would make the browser re-lay-out the page on every
+   * frame — which on the 1366×768 clinic desktops this is built for means
+   * visible jank while somebody is trying to sign in.
+   *
+   * No animation library. GSAP or Framer Motion would add 30–120 KB of
+   * JavaScript to the FIRST screen anyone sees, to do what eight keyframes
+   * already do. The sign-in screen is the one page that must not wait on a
+   * bundle.
+   *
+   * The global `prefers-reduced-motion` block above already flattens all of
+   * this to 0.01ms. These are additive decoration; nothing here carries
+   * information that is lost when it is switched off.
+   * ====================================================================== */
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 12px, 0);
+    }
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0);
+    }
+  }
+
+  /* Entrance for the sign-in card and the panel beside it. */
+  .animate-rise {
+    animation: rise 520ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+
+  /*
+   * Staggered children.
+   *
+   * 60ms apart, which is the interval that reads as one movement rather than
+   * a queue. Capped at six steps: beyond that the last item arrives late
+   * enough that somebody who types fast is already past it.
+   */
+  .stagger > * {
+    animation: rise 460ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+  .stagger > *:nth-child(1) { animation-delay: 60ms; }
+  .stagger > *:nth-child(2) { animation-delay: 120ms; }
+  .stagger > *:nth-child(3) { animation-delay: 180ms; }
+  .stagger > *:nth-child(4) { animation-delay: 240ms; }
+  .stagger > *:nth-child(5) { animation-delay: 300ms; }
+  .stagger > *:nth-child(n + 6) { animation-delay: 360ms; }
+
+  /*
+   * The drifting light behind the brand panel.
+   *
+   * A pair of blurred radial gradients on a slow transform loop. This is the
+   * whole "animated background" — no video, no GIF, no canvas. A 2 MB looping
+   * GIF would cost more than the rest of the page put together, cannot adapt
+   * to dark mode, and would still be downloading while somebody is trying to
+   * sign in on a clinic's ADSL line.
+   *
+   * 28 seconds, because anything quicker turns a calm surface into something
+   * that pulls the eye away from the password field.
+   */
+  @keyframes drift {
+    0%   { transform: translate3d(0, 0, 0) scale(1); }
+    50%  { transform: translate3d(3%, -4%, 0) scale(1.08); }
+    100% { transform: translate3d(0, 0, 0) scale(1); }
+  }
+  .animate-drift {
+    animation: drift 28s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+    will-change: transform;
+  }
+  .animate-drift-slow {
+    animation: drift 38s cubic-bezier(0.45, 0, 0.55, 1) infinite reverse;
+    will-change: transform;
+  }
+
+  /*
+   * The pulse on the mark.
+   *
+   * One ring, expanding and fading. It reads as a heartbeat without being a
+   * literal ECG, which on a product doctors use all day would be twee.
+   */
+  @keyframes pulse-ring {
+    0%   { opacity: 0.5; transform: scale(0.85); }
+    70%  { opacity: 0; transform: scale(1.9); }
+    100% { opacity: 0; transform: scale(1.9); }
+  }
+  .animate-pulse-ring {
+    animation: pulse-ring 3.2s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+  }
+
+  /*
+   * 3D, the cheap kind.
+   *
+   * `perspective` on the parent plus `rotate3d` on the child is a composited
+   * transform — the same cost as moving a box sideways. It is applied from a
+   * pointer handler that is rAF-throttled and switched off for touch and for
+   * reduced motion, so a phone never runs it.
+   */
+  .perspective {
+    perspective: 1400px;
+  }
+  .preserve-3d {
+    transform-style: preserve-3d;
+  }
+
+  /* Lifts a card toward the pointer without touching layout. */
+  .tilt {
+    transition: transform 420ms cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: transform;
+  }
+
+  /*
+   * Fields that line up across a grid, whatever their labels do.
+   *
+   * THE BUG THIS FIXES: in a two-column grid, "Medical registration number"
+   * wraps onto a second line at 640px and "Medical council" beside it does
+   * not. Both cells are a column of [label, control, hint], so the taller
+   * label pushes its input down and the two inputs sit on different
+   * baselines. It looks like a mistake because it is one.
+   *
+   * `subgrid` makes every field share the grid's rows rather than defining its
+   * own, so all the labels occupy one row, all the controls the next, and all
+   * the hints the third — aligned by construction rather than by hoping the
+   * text is short enough.
+   *
+   * The attribute selector beats Tailwind's `.flex` on specificity (0,2,0 to
+   * 0,1,0), so it wins regardless of stylesheet order. Where `subgrid` is not
+   * supported the declaration is dropped and the fields fall back to exactly
+   * today's behaviour.
+   */
+  .field-grid {
+    /*
+     * THE ROW GAP IS THE GAP *INSIDE* A FIELD, not between fields.
+     *
+     * A subgrid takes its row gaps from the parent, so this one value sits
+     * between label and control and between control and hint. The separation
+     * between one row of fields and the next therefore cannot come from
+     * `row-gap` as well — it comes from the margin below the last row, which
+     * grid gaps and margins happily coexist to produce.
+     */
+    row-gap: 0.375rem;
+    column-gap: 0.75rem;
+  }
+
+  .field-grid > [data-field] {
+    display: grid;
+    grid-template-rows: subgrid;
+    grid-row: span 3;
+  }
+
+  /* The space between one row of fields and the next. */
+  .field-grid > [data-field] > :last-child {
+    margin-bottom: 0.625rem;
+  }
+
+
   /* Touch targets stay at least 44×44 even where the visual control is smaller. */
   .tap-target {
     position: relative;

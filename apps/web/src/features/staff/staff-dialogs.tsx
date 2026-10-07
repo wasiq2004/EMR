@@ -11,7 +11,7 @@ import {
 import { ApiError } from '@/lib/api-client';
 import { useSession } from '@/lib/session';
 import { Button } from '@/components/ui/button';
-import { Field, Input, Select } from '@/components/ui/field';
+import { Field, FieldGrid, Input, Select } from '@/components/ui/field';
 import { Alert } from '@/components/ui/feedback';
 import { CredentialReveal } from '@/components/ui/credential-reveal';
 import { useToast } from '@/components/ui/toast';
@@ -159,7 +159,7 @@ export function InviteStaffDialog({
           </>
         ) : (
           <>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <FieldGrid>
               <Field label="Full name" htmlFor="staff-name" required>
                 <Input
                   id="staff-name"
@@ -175,7 +175,7 @@ export function InviteStaffDialog({
                   onChange={(event) => set({ email: event.target.value.toLowerCase() })}
                 />
               </Field>
-            </div>
+            </FieldGrid>
 
             <Field label="Role" htmlFor="staff-role" required hint={chosen?.detail}>
               <Select
@@ -213,7 +213,14 @@ export function InviteStaffDialog({
                   finalise a consultation until you do.
                 </Alert>
 
-                <div className="grid gap-3 sm:grid-cols-2">
+                {/*
+                  FieldGrid, not a bare grid. "Medical registration number"
+                  wraps onto a second line at this width and "Medical council"
+                  beside it does not, so the two inputs sat on different
+                  baselines. See `FieldGrid` for why shortening the label is not
+                  the fix.
+                */}
+                <FieldGrid>
                   <Field label="Medical registration number" htmlFor="staff-reg">
                     <Input
                       id="staff-reg"
@@ -248,7 +255,7 @@ export function InviteStaffDialog({
                       placeholder="General Medicine"
                     />
                   </Field>
-                </div>
+                </FieldGrid>
               </>
             ) : null}
 
@@ -390,7 +397,7 @@ export function EditStaffDialog({
               </Alert>
             ) : null}
 
-            <div className="grid gap-3 sm:grid-cols-2">
+            <FieldGrid>
               <Field label="Medical registration number" htmlFor="edit-reg">
                 <Input
                   id="edit-reg"
@@ -419,7 +426,7 @@ export function EditStaffDialog({
                   onChange={(event) => set({ specialty: event.target.value })}
                 />
               </Field>
-            </div>
+            </FieldGrid>
           </>
         ) : null}
 

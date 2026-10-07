@@ -954,6 +954,170 @@ entry exists.
       row refused, idempotent re-adding, the clinic's own drug searchable and
       prescribable, and the schedule stored null rather than guessed.
 
+## Nobody can sign in anywhere: the API cannot reach the database — 2026-10-07
+
+From the logs, not guessed. `SELECT 1` on `/readyz` failing every 15 seconds and
+`auth_resolve_account` failing on every sign-in — the simplest possible query and
+the login query, both dying. **Both took almost exactly 10 seconds**, which is
+`connectionTimeoutMillis` in `database.module.ts`. That is not a SQL error; it is
+the pool failing to hand out a connection at all.
+
+Also visible in the log and worth recording: `params: syedaffan@gmail.com,` — the
+clinic-slug parameter is EMPTY, so yesterday's `clinic-host` fix is deployed and
+working. That was not this.
+
+Three defects, each of which turned a recoverable incident into an outage that
+could not diagnose or fix itself.
+
+- [x] **No query timeouts anywhere.** `grep` for `statement_timeout` across the
+      API and the schema returned nothing. So a query that hangs — a lock it
+      will never get, a seq scan over a table that grew, a stalled socket
+      mid-result — pins its pooled connection FOREVER. Ten of those and `max: 10`
+      is gone. Every request after that waits the full 10 seconds for a slot
+      that is never coming back, then fails, and the process never recovers on
+      its own. Nothing in the log says why, because the request that fails is
+      never the one that caused it.
+
+      Now set as libpq session parameters on the pool, so they apply to every
+      connection it opens including replacements: `statement_timeout=30s`
+      (nothing legitimate here takes half a minute),
+      `idle_in_transaction_session_timeout=60s` (the one that actually frees a
+      leaked connection, and stops an abandoned transaction holding its locks),
+      and `lock_timeout=10s` (one failed request beats a queue of them all
+      holding connections behind the same row).
+- [x] **An unhandled `pool.on('error')`.** `pg` emits `error` on an IDLE client
+      whose connection drops — a database restart, a proxy cutting it, a network
+      blink. With no listener Node treats that as fatal and kills the process, so
+      one blip in Postgres took the API down with it. Now logged; the pool
+      discards the dead client and opens a fresh one by itself.
+- [x] **`/readyz` threw instead of reporting.** It ran `SELECT 1` with no
+      try/catch, so an unreachable database produced an UNHANDLED EXCEPTION:
+      a stack trace headed "Unhandled error on GET /v1/readyz", every fifteen
+      seconds, answered 500. A readiness probe exists precisely to report this
+      condition, so throwing is the one thing it must not do; 500 says "this
+      endpoint is broken" when the truth is "the thing behind it is"; and a
+      trace every fifteen seconds buries every other line — which is exactly
+      what the pasted log looked like, pages of identical traces with the cause
+      nowhere in them.
+
+      Now 503 with a sentence, throttled to one log line a minute, and it
+      reports the POOL COUNTERS — `waiting > 0` with `idle === 0` means the pool
+      is exhausted and somebody is holding connections, which no amount of
+      restarting Postgres will fix. That distinction is the whole diagnosis and
+      it took reading the driver's source to get from the old output.
+- [x] **A wedged API now restarts itself.** The `api` service already had a
+      healthcheck on `/readyz`, but `restart: unless-stopped` acts on a container
+      that EXITS and does nothing for one merely marked unhealthy — Docker keeps
+      an unhealthy container running indefinitely. So the API sat there answering
+      `/healthz` cheerfully, failing every real request, waiting for a human.
+
+      `DatabaseWatchdog` exits after six consecutive failed probes, about ninety
+      seconds, so the restart policy brings it back with a clean pool. The trade
+      is deliberate: restarting into a genuinely dead database crash-loops, which
+      is noisy and harmless and self-corrects the moment Postgres returns, while
+      sitting wedged is quiet and unbounded. For a clinic trying to work, loud
+      and self-correcting beats quiet and broken.
+
+      **The guards are the component**, since getting them wrong restarts a
+      HEALTHY API: it does nothing until the database has answered at least once
+      (so a slow-starting Postgres on a cold deploy never trips it), a single
+      success resets the count completely, and the interval is `unref`'d so it
+      cannot hold the event loop open against a clean SIGTERM. **6 unit tests**
+      cover exactly those, including that a non-Error rejection does not throw
+      inside the handler.
+
+### What still has to be found on the server
+- [ ] The ROOT CAUSE of this particular incident is on the Dokploy box and
+      cannot be read from here. The fixes above stop a hung query wedging the
+      pool and make the next occurrence diagnose itself — they do not explain
+      why the database became unreachable at 18:21 on 2026-10-07. The leading
+      suspect is memory: that box has 4 GB, nothing in `docker-compose.yml`
+      caps any container, and an uncapped Node process sizes its heap from host
+      RAM. Postgres being OOM-killed fits the evidence exactly.
+
+## The sign-in screen, redesigned — 2026-10-07
+
+Asked for: animation, depth, 3D, "a proper SaaS product for a doctor", without
+costing loading speed.
+
+**What the brief actually is**, because it decided everything else: a
+receptionist opens this at 8:40am with people already at the desk, and a doctor
+opens it between consultations. It is the most-used screen in the product and is
+looked at for about four seconds at a time. So the goal is "feel like something
+somebody paid for, then get out of the way" — not "impress a visitor".
+
+- [x] **Two-column layout**: a brand panel naming what the product does, and the
+      card. The panel is hidden below `lg`, where it would push the password
+      field below the fold — and a compact mark appears instead, because the
+      first pass left a phone showing a card headed "Sign in" with nothing
+      saying what it signs into.
+- [x] **Depth and 3D, done cheaply.** `perspective` on the wrapper and a
+      pointer-driven `rotate3d` on the card. A 3D rotation is a composited
+      property, so it costs the same as moving a box sideways and never
+      re-lays-out the page. The handler reads `getBoundingClientRect` once per
+      pointer-enter rather than per move — reading layout inside a mousemove is
+      what makes tilt effects stutter — and writes inside `requestAnimationFrame`.
+      Six degrees, not fifteen: it should read as the surface catching light,
+      not as a gimmick that wears out in a week.
+- [x] **Animation that costs nothing.** Eight CSS keyframes, all of them
+      `transform` and `opacity` only. Entrance rise, 60ms stagger, two drifting
+      lights on a 28s loop, one pulse ring on the mark.
+
+      **Three things deliberately NOT used**, each of which is the obvious way
+      to make a login screen look expensive:
+      * No background video or GIF — a megabyte or more on the first screen of
+        the day, on what is frequently a clinic's ADSL line, and it cannot
+        adapt to dark mode. The depth here is two blurred radial gradients and
+        a masked grid: a few bytes, resolution-independent, and they recolour
+        themselves in dark mode.
+      * No animation library. GSAP or Framer Motion is 30–120 KB of JavaScript
+        before anybody can type a password.
+      * No stock photography of smiling clinicians. It dates immediately, it is
+        never the clinic's own staff, and every competitor has the same one.
+
+      The tilt switches itself off entirely for coarse pointers and for
+      `prefers-reduced-motion`, so a phone never runs it.
+- [x] **Verified by looking at it**, not by assuming: screenshots at 1440, 1366
+      and 375, in light and dark. The first pass was honestly bad — a flat grey
+      page, lights invisible in light mode because they were drawn with
+      `--color-line-soft` at 22%, and the two columns drifting to opposite edges
+      of a `max-w-6xl` container with dead space between them. Fixed by raising
+      the lights to 42%/30%, drawing the grid with `--color-line`, adding a
+      third low light, and tightening to `max-w-5xl`.
+- [x] `✓ Compiled successfully`, 63/63 static pages, 178 unit tests, both
+      linters clean. (`next build` then fails on Windows at the
+      `output: 'standalone'` symlink step — EPERM, needs Developer Mode. It is
+      post-compile and does not occur on Linux, which is what Docker builds on.)
+
+## Form field alignment — measured, not assumed — 2026-10-07
+
+- [x] **`FieldGrid`, using CSS `subgrid`.** Every field shares the grid's rows,
+      so all labels occupy one row and all controls the next — aligned by
+      construction rather than by hoping the text is short enough.
+
+      `Field` now always emits exactly three children (label, control, footer),
+      with an empty footer when there is no hint or error. Subgrid can only
+      align fields against each other if every field contributes the same
+      number of rows; a field that sometimes emits two and sometimes three
+      would align on some rows of a form and not others, which reads as a bug
+      rather than as no alignment at all.
+
+      The row gap is the gap INSIDE a field, since a subgrid takes its gaps from
+      the parent. The separation between one row of fields and the next comes
+      from a margin under the last row instead.
+- [x] **Measured before claiming it.** At the real dialog width the labels do
+      NOT wrap, and the plain grid was already aligned — the bug I had assumed
+      was not occurring there. Forcing the wrap (a ~160px column) reproduces it:
+      **the plain grid puts the two inputs 18px apart, FieldGrid puts them at
+      0px.** So the fix is real, and it matters at narrow dialog and tablet
+      widths rather than everywhere.
+
+### Still to audit
+- [ ] The authenticated forms — patients/new, the encounter screen, pharmacy —
+      could not be looked at, because they need a session and the API was not
+      running. `FieldGrid` is applied to the staff dialogs only so far. The rest
+      needs a pass with the stack up.
+
 ## Sign-in refuses a correct password on a single-domain deployment — 2026-10-06
 
 Second report, after HTTPS was enabled. Now a real 401 with "That email and
