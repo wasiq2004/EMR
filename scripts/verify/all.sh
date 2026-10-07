@@ -51,6 +51,32 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 rc=0
+
+# ---------------------------------------------------------------------------
+# Does the API start at all?
+#
+# FIRST, and before the fixtures matter, because it is the cheapest check here
+# and it fails for a reason none of the others can see. A Nest dependency is
+# resolved at runtime from a Symbol, so a provider missing from its module's
+# `exports` compiles, lints, passes every unit test, and then kills the process
+# on boot. That shipped once: the container exited, never became healthy, and
+# the deploy aborted with "dependency failed to start" — which says nothing
+# about a missing export.
+#
+# It needs no database, so a failure here is unambiguous: the application cannot
+# be constructed, and nothing below would have told you that.
+# ---------------------------------------------------------------------------
+echo "=============================================================="
+echo " boot"
+echo "=============================================================="
+if bash "$here/boot.sh"; then
+  echo
+else
+  echo
+  echo "The API cannot start. Nothing below would run against it; stopping here." >&2
+  exit 1
+fi
+
 for suite in api-reads availability consultation-flow reminders analytics lab pharmacy import research broadcast platform; do
   echo "=============================================================="
   echo " $suite"

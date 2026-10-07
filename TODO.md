@@ -954,6 +954,49 @@ entry exists.
       row refused, idempotent re-adding, the clinic's own drug searchable and
       prescribable, and the schedule stored null rather than guessed.
 
+## I broke the deploy, and the fix for that — 2026-10-08
+
+The next deploy failed with:
+
+    Container ...-api-1 Started
+    Container ...-api-1 Waiting
+    dependency failed to start: container ...-api-1 is unhealthy
+
+**My fault, from the previous change.** `PG_POOL` is a provider in
+`DatabaseModule` and I injected it into `HealthController` to report the pool
+counters — without adding it to that module's `exports`. `@Global()` publishes a
+module's EXPORTS everywhere; it does not make private providers injectable. So
+Nest could not build the injector and the process exited during bootstrap. The
+container never became healthy, `web` depends on `api: service_healthy`, and the
+whole deploy aborted.
+
+Note what postgres was doing in that same log: **Healthy**. The database was
+fine. This was not the earlier outage recurring.
+
+- [x] **Exported `PG_POOL`.** Proven both ways against a real boot rather than
+      reasoned about: with the export, `API listening on :4567`; without it,
+      `UnknownDependenciesException: Nest can't resolve dependencies of the
+      HealthController (Symbol(DRIZZLE), ?) ... Symbol(PG_POOL) at index [1]`.
+- [x] **Swapped the libpq `options` string for node-postgres config keys.**
+      `statement_timeout`, `idle_in_transaction_session_timeout` and
+      `lock_timeout` are all first-class keys in the driver — checked against
+      its type definitions. A hand-built `-c name=value` startup string is one
+      typo away from a packet Postgres rejects, which would fail EVERY
+      connection and look exactly like the outage it was added to prevent.
+- [x] **`scripts/verify/boot.sh`, and it runs first in `all.sh`.** This is the
+      real lesson. A Nest dependency is resolved at runtime from a Symbol: the
+      type checker cannot see it, ESLint cannot see it, and no unit test touches
+      the injector. The change compiled, linted and passed 48 tests, and was
+      still fatal on boot — "everything green" was not evidence of anything
+      here, and I reported it as though it were.
+
+      The check needs NO DATABASE, which is what makes it cheap enough to run on
+      every change: `pg.Pool` opens no socket until the first query, so the whole
+      injector builds and every route maps against a connection string pointing
+      at nothing. Verified it catches the regression: re-breaking the export
+      makes it fail, name the missing symbol, and explain that `@Global()`
+      exports are not private providers.
+
 ## Nobody can sign in anywhere: the API cannot reach the database — 2026-10-07
 
 From the logs, not guessed. `SELECT 1` on `/readyz` failing every 15 seconds and

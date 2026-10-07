@@ -37,38 +37,37 @@ const logger = new Logger('Database');
            * THE TIMEOUTS THAT STOP ONE BAD QUERY TAKING THE API DOWN FOR GOOD.
            *
            * Without these, a query that hangs — a lock it will never get, a
-           * seq scan over a table that grew, a network stall mid-result —
-           * pins its pooled connection FOREVER. Ten of those and `max: 10` is
-           * gone. Every request afterwards waits the full
-           * `connectionTimeoutMillis` for a slot that is never coming back,
-           * then fails. The process never recovers on its own; it has to be
-           * restarted, and nothing in the logs says why, because the failing
-           * request is never the one that caused it.
+           * seq scan over a table that grew, a network stall mid-result — pins
+           * its pooled connection FOREVER. Ten of those and `max: 10` is gone.
+           * Every request afterwards waits the full `connectionTimeoutMillis`
+           * for a slot that is never coming back, then fails. The process never
+           * recovers on its own, and nothing in the logs says why, because the
+           * request that fails is never the one that caused it.
            *
            * That is not hypothetical — it is the shape of the outage this was
            * added for: `SELECT 1` on the readiness probe timing out after
            * exactly 10 seconds, every 15 seconds, while sign-in did the same.
            *
-           * Set as server-side session parameters via libpq's `options`, so
-           * they apply to every connection this pool opens, including ones it
-           * replaces later. Enforcing them in the client instead would abandon
-           * the query without telling Postgres to stop running it.
+           * THESE ARE node-postgres CONFIG KEYS, not a hand-built libpq
+           * `options` string. The driver issues each as a `SET` on connect, so
+           * a typo is a typed error here rather than a startup packet Postgres
+           * rejects — which would make every connection fail and look exactly
+           * like the outage this is meant to prevent.
            *
-           *   statement_timeout                     — no single statement may
-           *     run longer than 30s. Every legitimate query in this product is
-           *     a clinic-sized read; nothing takes half a minute.
-           *   idle_in_transaction_session_timeout   — a transaction left open
-           *     and idle is released after 60s. This is the one that actually
-           *     frees a leaked connection, and it also stops an abandoned
-           *     transaction holding its locks indefinitely.
-           *   lock_timeout                          — 10s waiting for a lock,
-           *     then give up. Better one failed request than a queue of them
-           *     all holding connections behind the same row.
+           *   statement_timeout                   — no single statement runs
+           *     longer than 30s. Every legitimate query here is a clinic-sized
+           *     read; nothing takes half a minute.
+           *   idle_in_transaction_session_timeout — a transaction left open and
+           *     idle is released after 60s. This is the one that actually frees
+           *     a leaked connection, and it stops an abandoned transaction
+           *     holding its locks indefinitely.
+           *   lock_timeout                        — 10s waiting for a lock,
+           *     then give up. One failed request beats a queue of them all
+           *     holding connections behind the same row.
            */
-          options:
-            '-c statement_timeout=30000' +
-            ' -c idle_in_transaction_session_timeout=60000' +
-            ' -c lock_timeout=10000',
+          statement_timeout: 30_000,
+          idle_in_transaction_session_timeout: 60_000,
+          lock_timeout: 10_000,
         });
 
         /*
@@ -98,7 +97,21 @@ const logger = new Logger('Database');
     TenantDb,
     DatabaseWatchdog,
   ],
-  exports: [DRIZZLE, TenantDb],
+  /*
+   * PG_POOL IS EXPORTED, and leaving it out was a real outage.
+   *
+   * `@Global()` publishes a module's EXPORTS everywhere without an import — it
+   * does not make its private providers injectable. So `@Inject(PG_POOL)` in
+   * the health controller could not be resolved, Nest failed to build the
+   * injector, and the API exited during bootstrap. The container never became
+   * healthy, `web` depends on `api: service_healthy`, and the whole deploy
+   * aborted with "dependency failed to start".
+   *
+   * It fails at startup rather than at the first request, which is the good
+   * version of this mistake — but only the deploy log says so, and a DI error
+   * reads nothing like the health-check failure it surfaces as.
+   */
+  exports: [DRIZZLE, TenantDb, PG_POOL],
 })
 export class DatabaseModule implements OnApplicationShutdown {
   constructor(@Inject(PG_POOL) private readonly pool: Pool) {}
