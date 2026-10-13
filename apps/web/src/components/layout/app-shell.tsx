@@ -58,7 +58,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     */
     <div className="flex min-h-dvh bg-canvas" data-panel={panel.id}>
       {/* Persistent rail on a clinic desktop; 1366×768 is the design target. */}
-      <aside className="hidden w-56 shrink-0 border-r border-line bg-surface lg:block">
+      <aside className="hidden w-60 shrink-0 border-r border-rail-line bg-rail lg:block">
         <div className="sticky top-0 h-dvh">
           <Sidebar counts={counts} />
         </div>

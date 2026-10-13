@@ -53,17 +53,36 @@
   --text-3xl: 1.875rem;
   --text-3xl--line-height: 2.25rem;
 
+  /*
+   * Page titles.
+   *
+   * The screen was set at 20px for a page title over a 13px base — correct for
+   * density and the reason every screen read as one undifferentiated field of
+   * text. A heading has to be able to win against a table. 28px with tight
+   * tracking does that without costing a single row of data, because the title
+   * is one line and the density that matters is below it.
+   */
+  --text-display: 1.75rem;
+  --text-display--line-height: 2.125rem;
+
   /* ---- Neutral surfaces ---------------------------------------------- */
   /* Cool-biased greys, tuned toward the accent so nothing reads as default. */
   --color-canvas: #f4f6f7;
   --color-surface: #ffffff;
   --color-surface-sunk: #eceff1;
+  /* The navigation rail. Its own tone, so the workspace reads as a frame around
+     the work rather than as one undivided white sheet. */
+  --color-rail: #eef2f4;
+  --color-rail-line: #dde4e8;
   --color-surface-raised: #ffffff;
   --color-overlay: #0d181c;
 
   --color-ink: #10202a;
   --color-ink-soft: #445862;
-  --color-ink-faint: #5d737d;
+  /* Two points darker than it was, so it still clears 4.5:1 against the
+     navigation rail — the rail is a darker ground than the white surface
+     this value was originally tuned for. */
+  --color-ink-faint: #5b717b;
   --color-ink-inverse: #f7fafb;
 
   --color-line: #d5dde1;
@@ -99,6 +118,8 @@
      near-black in dark mode, where they are all light pastels. Getting this
      wrong is the one way a tinted chip becomes unreadable. */
   --color-panel-contrast: #ffffff;
+  /* Pressed state for a panel-coloured control. */
+  --color-panel-hover: #0b574e;
 
   /* ---- Clinical state ------------------------------------------------ */
   /* Never reused for branding. Always paired with an icon or a word. */
@@ -124,10 +145,11 @@
   --color-chronic-soft: #ece7f8;
 
   /* ---- Radius and elevation ------------------------------------------ */
-  --radius-xs: 3px;
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 10px;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
 
   /*
    * Elevation.
@@ -142,11 +164,18 @@
    * that muddiness is most of the difference between "clean" and "cheap".
    */
   --shadow-raise:
-    0 1px 1px rgb(16 32 42 / 0.05),
-    0 2px 6px -1px rgb(16 32 42 / 0.06);
-  --shadow-pop:
     0 1px 2px rgb(16 32 42 / 0.06),
-    0 8px 20px -4px rgb(16 32 42 / 0.12);
+    0 4px 12px -2px rgb(16 32 42 / 0.08),
+    0 12px 28px -8px rgb(16 32 42 / 0.06);
+  --shadow-pop:
+    0 1px 2px rgb(16 32 42 / 0.07),
+    0 10px 24px -6px rgb(16 32 42 / 0.14),
+    0 24px 48px -12px rgb(16 32 42 / 0.10);
+  /* A card the pointer is on. Enough travel to read as a lift, not a jump. */
+  --shadow-lift:
+    0 2px 4px rgb(16 32 42 / 0.07),
+    0 14px 32px -8px rgb(16 32 42 / 0.16),
+    0 30px 60px -16px rgb(16 32 42 / 0.12);
   --shadow-modal:
     0 2px 4px rgb(16 32 42 / 0.08),
     0 24px 56px -12px rgb(16 32 42 / 0.28);
@@ -179,41 +208,50 @@
   --color-panel: #1f5fa8;
   --color-panel-soft: #e2ecf8;
   --color-panel-ink: #17487e;
+  --color-panel-hover: #17487e;
 }
 [data-panel='doctor'] {
   --color-panel: #0e6e63;
   --color-panel-soft: #daeeea;
   --color-panel-ink: #0a4a43;
+  --color-panel-hover: #0b574e;
 }
 [data-panel='nursing'] {
   --color-panel: #a33a62;
   --color-panel-soft: #fae5ec;
   --color-panel-ink: #7c2b49;
+  --color-panel-hover: #7c2b49;
 }
 [data-panel='clinic-admin'] {
   --color-panel: #8a5a12;
   --color-panel-soft: #f7ebd9;
   --color-panel-ink: #66420d;
+  --color-panel-hover: #66420d;
 }
 [data-panel='pharmacy'] {
   --color-panel: #2f6b37;
   --color-panel-soft: #e3f0e4;
   --color-panel-ink: #22512a;
+  --color-panel-hover: #22512a;
 }
 [data-panel='analytics'] {
   --color-panel: #6b4aa8;
   --color-panel-soft: #ece6f7;
   --color-panel-ink: #4f3680;
+  --color-panel-hover: #4f3680;
 }
 [data-panel='compliance'] {
   --color-panel: #555c66;
   --color-panel-soft: #eceef1;
   --color-panel-ink: #3e434e;
+  --color-panel-hover: #3e434e;
 }
 
 /* Dark theme. Clinics run late; a night shift should not be a white flash. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
+    --color-rail: #101a1e;
+    --color-rail-line: #223037;
     --color-panel-contrast: #0d1518;
     --color-canvas: #0d1518;
     --color-surface: #141f23;
@@ -264,40 +302,49 @@
     --color-panel: #74aae0;
     --color-panel-soft: #13273a;
     --color-panel-ink: #9cc6ef;
+      --color-panel-hover: #9cc6ef;
   }
   :root:not([data-theme='light']) [data-panel='doctor'] {
     --color-panel: #4fb3a4;
     --color-panel-soft: #10312e;
     --color-panel-ink: #7fc4b5;
+      --color-panel-hover: #6ac4b6;
   }
   :root:not([data-theme='light']) [data-panel='nursing'] {
     --color-panel: #e08aa6;
     --color-panel-soft: #381c26;
     --color-panel-ink: #eeaabf;
+      --color-panel-hover: #eeaabf;
   }
   :root:not([data-theme='light']) [data-panel='clinic-admin'] {
     --color-panel: #dfa953;
     --color-panel-soft: #33280f;
     --color-panel-ink: #e8bf7e;
+      --color-panel-hover: #e8bf7e;
   }
   :root:not([data-theme='light']) [data-panel='pharmacy'] {
     --color-panel: #6cc48d;
     --color-panel-soft: #102b1b;
     --color-panel-ink: #93d6ab;
+      --color-panel-hover: #93d6ab;
   }
   :root:not([data-theme='light']) [data-panel='analytics'] {
     --color-panel: #a794dd;
     --color-panel-soft: #231d38;
     --color-panel-ink: #c0b2e8;
+      --color-panel-hover: #c0b2e8;
   }
   :root:not([data-theme='light']) [data-panel='compliance'] {
     --color-panel: #a8b0bd;
     --color-panel-soft: #1e242c;
     --color-panel-ink: #c2c8d2;
+      --color-panel-hover: #c2c8d2;
   }
 }
 
 :root[data-theme='dark'] {
+    --color-rail: #101a1e;
+    --color-rail-line: #223037;
     --color-panel-contrast: #0d1518;
   --color-canvas: #0d1518;
   --color-surface: #141f23;
@@ -345,36 +392,43 @@
   --color-panel: #74aae0;
   --color-panel-soft: #13273a;
   --color-panel-ink: #9cc6ef;
+  --color-panel-hover: #9cc6ef;
 }
 :root[data-theme='dark'] [data-panel='doctor'] {
   --color-panel: #4fb3a4;
   --color-panel-soft: #10312e;
   --color-panel-ink: #7fc4b5;
+  --color-panel-hover: #6ac4b6;
 }
 :root[data-theme='dark'] [data-panel='nursing'] {
   --color-panel: #e08aa6;
   --color-panel-soft: #381c26;
   --color-panel-ink: #eeaabf;
+  --color-panel-hover: #eeaabf;
 }
 :root[data-theme='dark'] [data-panel='clinic-admin'] {
   --color-panel: #dfa953;
   --color-panel-soft: #33280f;
   --color-panel-ink: #e8bf7e;
+  --color-panel-hover: #e8bf7e;
 }
 :root[data-theme='dark'] [data-panel='pharmacy'] {
   --color-panel: #6cc48d;
   --color-panel-soft: #102b1b;
   --color-panel-ink: #93d6ab;
+  --color-panel-hover: #93d6ab;
 }
 :root[data-theme='dark'] [data-panel='analytics'] {
   --color-panel: #a794dd;
   --color-panel-soft: #231d38;
   --color-panel-ink: #c0b2e8;
+  --color-panel-hover: #c0b2e8;
 }
 :root[data-theme='dark'] [data-panel='compliance'] {
   --color-panel: #a8b0bd;
   --color-panel-soft: #1e242c;
   --color-panel-ink: #c2c8d2;
+  --color-panel-hover: #c2c8d2;
 }
 
 /* ---- Base ------------------------------------------------------------ */

@@ -19,7 +19,7 @@ export function Panel({
   return (
     <div
       className={cn(
-        'rounded-lg border border-line bg-surface shadow-raise',
+        'rounded-lg border border-line-soft bg-surface shadow-raise',
         className,
       )}
       {...props}
@@ -41,12 +41,12 @@ export function PanelHeader({
   return (
     <div
       className={cn(
-        'flex flex-wrap items-start justify-between gap-3 border-b border-line-soft px-4 py-3',
+        'flex flex-wrap items-start justify-between gap-3 border-b border-line-soft px-5 py-3.5',
         className,
       )}
     >
       <div className="min-w-0">
-        <h2 className="text-sm font-semibold text-ink">{title}</h2>
+        <h2 className="text-md font-semibold tracking-tight text-ink">{title}</h2>
         {description ? (
           <p className="mt-0.5 text-xs text-ink-faint">{description}</p>
         ) : null}
@@ -60,7 +60,7 @@ export function PanelBody({
   className,
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('p-4', className)} {...props} />;
+  return <div className={cn('p-5', className)} {...props} />;
 }
 
 /** A page-level heading block. One per screen. */
@@ -95,12 +95,12 @@ export function PageHeader({
             a hundred times and needing to know, in one glance, which workspace
             it is looking at.
           */}
-          <span className="mb-2 block h-0.5 w-8 rounded-full bg-panel" aria-hidden />
-          <h1 className="text-xl font-semibold tracking-tight text-ink text-balance">
+          <span className="mb-2.5 block h-1 w-10 rounded-full bg-panel" aria-hidden />
+          <h1 className="text-display font-semibold tracking-tighter text-ink text-balance">
             {title}
           </h1>
           {description ? (
-            <p className="mt-1 max-w-prose text-sm text-ink-soft">{description}</p>
+            <p className="mt-1.5 max-w-prose text-md text-ink-soft">{description}</p>
           ) : null}
         </div>
         {actions ? (
@@ -163,8 +163,10 @@ export function Stat({
 
   return (
     <div className="min-w-0">
-      <p className="text-2xs uppercase tracking-wide text-ink-faint">{label}</p>
-      <p className={cn('mt-1 text-2xl font-semibold tabular', valueTone)}>{value}</p>
+      <p className="text-2xs font-medium uppercase tracking-wider text-ink-faint">{label}</p>
+      <p className={cn('mt-1.5 text-3xl font-semibold tracking-tight tabular', valueTone)}>
+        {value}
+      </p>
       {hint ? <p className="mt-0.5 text-2xs text-ink-faint">{hint}</p> : null}
     </div>
   );

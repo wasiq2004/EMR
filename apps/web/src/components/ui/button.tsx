@@ -28,8 +28,16 @@ const button = cva(
   {
     variants: {
       variant: {
+        /*
+         * The panel's colour, not the brand's.
+         *
+         * A blue Front Desk carrying a green button is two accents arguing on
+         * one screen, and that incoherence is most of what reads as unfinished.
+         * `--color-panel` falls back to the brand teal wherever no panel is
+         * declared, so anything outside the shell is unchanged.
+         */
         primary:
-          'bg-accent text-accent-contrast hover:bg-accent-hover shadow-raise hover:shadow-pop',
+          'bg-panel text-panel-contrast hover:bg-panel-hover shadow-raise hover:shadow-pop',
         secondary:
           'bg-surface text-ink border border-line hover:bg-surface-sunk hover:border-line-strong shadow-raise',
         ghost: 'text-ink-soft hover:bg-surface-sunk hover:text-ink',

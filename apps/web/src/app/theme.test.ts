@@ -62,6 +62,10 @@ const PAIRS: [string, string, number, string][] = [
   ['ink-soft', 'surface', 4.5, 'secondary text'],
   ['ink-faint', 'surface', 4.5, 'timestamps and hints'],
   ['ink-faint', 'canvas', 4.5, 'hints on the page ground'],
+  ['ink', 'rail', 4.5, 'a navigation label'],
+  ['ink-soft', 'rail', 4.5, 'an inactive navigation item'],
+  ['ink-faint', 'rail', 4.5, 'a section heading in the sidebar'],
+  ['rail-line', 'rail', 1.0, 'the divider under the brand block'],
   ['accent', 'surface', 3.0, 'links and icons'],
   ['accent-contrast', 'accent', 4.5, 'primary button label'],
   ['accent-ink', 'accent-soft', 4.5, 'active navigation item'],
@@ -137,15 +141,27 @@ describe.each(PANEL_THEMES)('panel tints in %s', (_label, prefix, palette) => {
     // The active navigation item: panel-coloured text on the panel's own soft
     // background. This is the pairing that has gone wrong here before.
     expect(
-      contrast(tint['panel-ink']!, tint['panel-soft']!),
-      `${panel}: active nav text on its own background`,
+      contrast(tint['panel-ink']!, palette['surface']!),
+      `${panel}: active nav text on its raised pill`,
     ).toBeGreaterThanOrEqual(4.5);
+
+    // Kept: panel-soft is still the tint behind badges and soft callouts.
+    expect(
+      contrast(tint['panel-ink']!, tint['panel-soft']!),
+      `${panel}: panel text on its own soft fill`,
+    ).toBeGreaterThanOrEqual(4.5);
+
+    // The icon on the active row, which carries the panel colour directly.
+    expect(
+      contrast(tint['panel']!, palette['surface']!),
+      `${panel}: the active row icon`,
+    ).toBeGreaterThanOrEqual(3.0);
 
     // The indicator bar and the rule above the page title are non-text, so the
     // boundary rule applies rather than the text one.
     expect(
-      contrast(tint['panel']!, palette['surface']!),
-      `${panel}: the active indicator against the sidebar`,
+      contrast(tint['panel']!, palette['rail']!),
+      `${panel}: the panel mark against the rail`,
     ).toBeGreaterThanOrEqual(3.0);
 
     // The mark inside the sidebar chip, which is an icon on the solid fill.

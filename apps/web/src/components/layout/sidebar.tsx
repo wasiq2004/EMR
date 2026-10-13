@@ -31,7 +31,7 @@ export function Sidebar({
   const PanelMark = definition.mark;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col bg-rail">
       {/*
         TOUCHPOINT 1 of 3 — the chip.
 
@@ -40,15 +40,15 @@ export function Sidebar({
         alone does not. The panel is named directly underneath, so nobody has
         to learn what a colour means.
       */}
-      <div className="flex items-center gap-2.5 px-4 py-4">
+      <div className="mb-1 flex items-center gap-3 border-b border-rail-line px-4 py-4">
         <span
-          className="flex size-8 shrink-0 items-center justify-center rounded-md bg-panel text-panel-contrast"
+          className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-panel text-panel-contrast shadow-raise"
           aria-hidden
         >
-          <PanelMark className="size-4" />
+          <PanelMark className="size-5" />
         </span>
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-ink">
+          <p className="truncate text-md font-semibold tracking-tight text-ink">
             {session.clinicName}
           </p>
           {/*
@@ -66,7 +66,7 @@ export function Sidebar({
         {sections.map((section, index) => (
           <div key={section.title ?? `section-${index}`} className="mb-4">
             {section.title ? (
-              <p className="px-2 pb-1 text-2xs font-semibold uppercase tracking-wide text-ink-faint">
+              <p className="px-2.5 pb-1.5 text-2xs font-semibold uppercase tracking-wider text-ink-faint">
                 {section.title}
               </p>
             ) : null}
@@ -85,18 +85,22 @@ export function Sidebar({
                       onClick={onNavigate}
                       aria-current={active ? 'page' : undefined}
                       className={cn(
-                        'flex items-center gap-2.5 rounded-md px-2 py-2 text-sm transition-colors',
+                        'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm',
+                        'transition-[background-color,color,box-shadow,transform] duration-(--duration-ui) ease-(--ease-ui)',
                         // TOUCHPOINT 2 of 3 — where you are, in the panel's
                         // own colour. `aria-current` already carries this for
                         // a screen reader; the bar carries it for everyone
                         // else, and the weight change carries it without
                         // colour at all.
                         active
-                          ? 'bg-panel-soft font-medium text-panel-ink shadow-[inset_2px_0_0_0_var(--color-panel)]'
-                          : 'text-ink-soft hover:bg-surface-sunk hover:text-ink',
+                          ? 'bg-surface font-semibold text-panel-ink shadow-raise ring-1 ring-line-soft'
+                          : 'text-ink-soft hover:bg-surface/70 hover:text-ink',
                       )}
                     >
-                      <Icon className="size-4 shrink-0" aria-hidden />
+                      <Icon
+                        className={cn('size-4 shrink-0', active && 'text-panel')}
+                        aria-hidden
+                      />
                       <span className="min-w-0 flex-1 truncate">{item.label}</span>
                       {count && count > 0 ? (
                         <Badge tone={active ? 'accent' : 'neutral'}>{count}</Badge>
