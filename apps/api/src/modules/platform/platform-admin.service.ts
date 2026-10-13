@@ -6,7 +6,6 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { asc, eq, sql } from 'drizzle-orm';
-import { randomBytes } from 'node:crypto';
 import * as schema from '@emr/db/schema';
 import { FEATURES, allFeaturesOn, resolveFeatures, type FeatureSet } from '@emr/contracts';
 
@@ -270,7 +269,12 @@ export class PlatformAdminService {
 
   async createOperator(
     actor: PlatformActor,
-    input: { fullName: string; email: string; role: 'SUPPORT' | 'OPERATOR' | 'PLATFORM_ADMIN' },
+    input: {
+      fullName: string;
+      email: string;
+      role: 'SUPPORT' | 'OPERATOR' | 'PLATFORM_ADMIN';
+      password: string;
+    },
   ) {
     const email = input.email.trim().toLowerCase();
 
@@ -284,8 +288,10 @@ export class PlatformAdminService {
       throw new ConflictException('An operator with that email already exists.');
     }
 
-    const temporary = randomBytes(12).toString('base64url');
-    const hash = await this.passwords.hash(temporary);
+    // Chosen by whoever is creating the account, not generated. Same reasoning
+    // as the clinic staff path: the person doing this is usually handing the
+    // credential over directly.
+    const hash = await this.passwords.hash(input.password);
 
     const [created] = await this.platform.db
       .insert(schema.platformUser)
@@ -298,9 +304,7 @@ export class PlatformAdminService {
       role: input.role,
     });
 
-    // Returned once, shown once. There is no mail provider, and pretending
-    // otherwise would leave the new operator waiting for an email.
-    return { id: created!.id, temporaryPassword: temporary };
+    return { id: created!.id };
   }
 
   async updateOperator(
@@ -371,7 +375,7 @@ export class PlatformAdminService {
     return { saved: true };
   }
 
-  async resetOperatorPassword(actor: PlatformActor, operatorId: string) {
+  async resetOperatorPassword(actor: PlatformActor, operatorId: string, password: string) {
     const [existing] = await this.platform.db
       .select()
       .from(schema.platformUser)
@@ -379,8 +383,7 @@ export class PlatformAdminService {
       .limit(1);
     if (!existing) throw new NotFoundException('That operator could not be found.');
 
-    const temporary = randomBytes(12).toString('base64url');
-    const hash = await this.passwords.hash(temporary);
+    const hash = await this.passwords.hash(password);
 
     await this.platform.db
       .update(schema.platformUser)
@@ -397,7 +400,7 @@ export class PlatformAdminService {
       email: existing.email,
     });
 
-    return { temporaryPassword: temporary };
+    return { ok: true };
   }
 
   /* ---- Deployment settings ----------------------------------------------- */

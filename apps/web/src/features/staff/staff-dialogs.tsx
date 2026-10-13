@@ -12,8 +12,8 @@ import { ApiError } from '@/lib/api-client';
 import { useSession } from '@/lib/session';
 import { Button } from '@/components/ui/button';
 import { Field, FieldGrid, Input, Select } from '@/components/ui/field';
+import { PasswordPair, passwordProblem } from '@/components/ui/password-pair';
 import { Alert } from '@/components/ui/feedback';
-import { CredentialReveal } from '@/components/ui/credential-reveal';
 import { useToast } from '@/components/ui/toast';
 import {
   Dialog,
@@ -96,68 +96,40 @@ export function InviteStaffDialog({
     medicalCouncil: '',
     qualifications: '',
     specialty: '',
+    password: '',
+    confirmPassword: '',
   };
 
   const [form, setForm] = React.useState(blank);
-  const [issued, setIssued] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (open) return;
     setForm(blank);
-    setIssued(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
-  const ready = form.fullName.trim().length >= 2 && EMAIL.test(form.email);
+  const password = passwordProblem(form.password, form.confirmPassword);
+  const ready =
+    form.fullName.trim().length >= 2 && EMAIL.test(form.email) && password === null;
 
   const chosen = ASSIGNABLE_ROLES.find((r) => r.value === form.role);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/*
-        `mandatory` ONCE A PASSWORD IS SHOWING, and only then.
-
-        It blocks the Escape key, an outside click and the corner close button.
-        While the form is open those are ordinary ways to change your mind, so
-        they stay. Once the password is on screen they are destructive: it is
-        argon2-hashed before the row is written and exists nowhere in plaintext,
-        so dismissing this dialog by accident loses the only copy and the account
-        needs another password issued. The way out is the Done button.
+        This dialog used to become `mandatory` after submitting, because the
+        server generated the password, returned it once, and an accidental
+        Escape lost the only copy. The administrator types it now, so there is
+        no secret on screen that cannot be recovered — and no reason to trap
+        anybody in a dialog.
       */}
-      <DialogContent size="lg" mandatory={issued !== null}>
+      <DialogContent size="lg">
         <DialogHeader>
-          <DialogTitle>{issued ? 'Account created' : 'Add a staff member'}</DialogTitle>
+          <DialogTitle>Add a staff member</DialogTitle>
         </DialogHeader>
 
-        {issued ? (
-          <>
-            <p className="text-sm text-ink-soft">
-              <span className="font-semibold text-ink">{form.fullName}</span> can now sign
-              in as {ROLE_LABEL[form.role]}. Give them the password below before you
-              close this — it cannot be shown again.
-            </p>
-            <CredentialReveal
-              email={form.email}
-              password={issued}
-              what={ROLE_LABEL[form.role].toLowerCase()}
-            />
-            <DialogFooter>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setForm(blank);
-                  setIssued(null);
-                }}
-              >
-                Add another
-              </Button>
-              <Button variant="primary" onClick={() => onOpenChange(false)}>
-                Done
-              </Button>
-            </DialogFooter>
-          </>
-        ) : (
+        {(
           <>
             <FieldGrid>
               <Field label="Full name" htmlFor="staff-name" required>
@@ -176,6 +148,14 @@ export function InviteStaffDialog({
                 />
               </Field>
             </FieldGrid>
+
+            <PasswordPair
+              idPrefix="staff"
+              password={form.password}
+              confirmation={form.confirmPassword}
+              onPassword={(value) => set({ password: value })}
+              onConfirmation={(value) => set({ confirmPassword: value })}
+            />
 
             <Field label="Role" htmlFor="staff-role" required hint={chosen?.detail}>
               <Select
@@ -269,9 +249,12 @@ export function InviteStaffDialog({
                 loading={invite.isPending}
                 onClick={() =>
                   invite.mutate(cleaned(form), {
-                    onSuccess: (data) => {
-                      setIssued(data.temporaryPassword);
-                      toast.success(`${form.fullName} added`);
+                    onSuccess: () => {
+                      toast.success(
+                        `${form.fullName} added`,
+                        'They can sign in with the password you set.',
+                      );
+                      onOpenChange(false);
                     },
                     onError: (error) =>
                       toast.error(
@@ -505,59 +488,73 @@ export function ResetStaffPasswordDialog({
 }) {
   const toast = useToast();
   const reset = useResetStaffPassword();
-  const [issued, setIssued] = React.useState<string | null>(null);
+  const [password, setPassword] = React.useState('');
+  const [confirmation, setConfirmation] = React.useState('');
 
   React.useEffect(() => {
-    if (!user) setIssued(null);
+    setPassword('');
+    setConfirmation('');
   }, [user]);
+
+  const problem = passwordProblem(password, confirmation);
 
   return (
     <Dialog open={user !== null} onOpenChange={(open) => (open ? undefined : onClose())}>
-      {/* Undismissable once the password is showing — see the invite dialog. */}
-      <DialogContent mandatory={issued !== null}>
+      {/*
+        Dismissable again. It was undismissable while a generated password was
+        on screen, because closing it lost the only copy; nothing here is
+        unrecoverable now.
+      */}
+      <DialogContent>
         <DialogHeader>
-          <DialogTitle>Reset password for {user?.fullName}</DialogTitle>
+          <DialogTitle>Set a new password for {user?.fullName}</DialogTitle>
         </DialogHeader>
 
-        {issued && user ? (
-          <CredentialReveal
-            email={user.email}
-            password={issued}
-            what={ROLE_LABEL[user.role].toLowerCase()}
-          />
-        ) : (
-          <Alert tone="info" title="There is no self-service reset in this product">
-            No mail provider is connected, and a reset link that never arrives is
-            worse than none. You issue a new password here and read it out; they
-            change it at first sign-in.
-          </Alert>
-        )}
+        <Alert tone="info" title="There is no self-service reset in this product">
+          No mail provider is connected, and a reset link that never arrives is
+          worse than none. Set a password here and tell them what it is.
+        </Alert>
+
+        <PasswordPair
+          idPrefix="reset"
+          label="New password"
+          hint="At least 8 characters."
+          password={password}
+          confirmation={confirmation}
+          onPassword={setPassword}
+          onConfirmation={setConfirmation}
+        />
 
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
-            {issued ? 'Done' : 'Cancel'}
+            Cancel
           </Button>
-          {!issued ? (
-            <Button
-              variant="primary"
-              loading={reset.isPending}
-              onClick={() =>
-                user &&
-                reset.mutate(user.id, {
-                  onSuccess: (data) => {
-                    setIssued(data.temporaryPassword);
-                    toast.success('New password issued');
+          <Button
+            variant="primary"
+            disabled={problem !== null}
+            loading={reset.isPending}
+            onClick={() =>
+              user &&
+              reset.mutate(
+                { id: user.id, password },
+                {
+                  onSuccess: () => {
+                    toast.success(
+                      'Password updated',
+                      `Tell ${user.fullName} what you set.`,
+                    );
+                    onClose();
                   },
                   onError: (error) =>
                     toast.error(
                       error instanceof ApiError ? error.message : 'That did not work',
                     ),
-                })
-              }
-            >
-              Issue a new password
-            </Button>
-          ) : null}
+                },
+              )
+            }
+          >
+            Set password
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -574,11 +571,15 @@ function cleaned(form: {
   medicalCouncil: string;
   qualifications: string;
   specialty: string;
+  password: string;
 }): InviteStaffInput {
   return {
     fullName: form.fullName.trim(),
     email: form.email.trim(),
     role: form.role,
+    // Sent as typed. Trimming a password silently changes it, and the person
+    // who then cannot sign in has no way to discover why.
+    password: form.password,
     mobileE164: form.mobileE164.trim() || null,
     medicalRegistrationNumber: form.medicalRegistrationNumber.trim() || null,
     medicalCouncil: form.medicalCouncil.trim() || null,

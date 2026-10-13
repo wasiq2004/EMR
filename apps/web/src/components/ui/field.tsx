@@ -44,7 +44,7 @@ const inputBase =
 /**
  * A password field with a reveal toggle.
  *
- * ONE COMPONENT FOR ALL SIX, for the same reason `CredentialReveal` is shared
+ * ONE COMPONENT FOR ALL SIX, for the same reason every other shared control is
  * across the three flows that mint a credential: the handling rules are
  * identical, and writing them out six times is how one of them ends up without
  * the auto-hide or with a button that submits the form.

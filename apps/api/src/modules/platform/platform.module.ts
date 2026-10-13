@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { AccountPassword, SetAccountPassword } from '@emr/contracts';
 
 import { config } from '../../config';
 import { Public } from '../../common/http/decorators';
@@ -113,6 +114,8 @@ const OperatorInput = z.object({
   fullName: z.string().trim().min(2),
   email: z.string().email(),
   role: z.enum(['SUPPORT', 'OPERATOR', 'PLATFORM_ADMIN']),
+  // Chosen, not generated. Same rule as every other password in the product.
+  password: AccountPassword,
 });
 
 const OnboardInput = z.object({
@@ -124,6 +127,9 @@ const OnboardInput = z.object({
     .regex(/^[a-z0-9][a-z0-9-]*[a-z0-9]$/, 'The slug is the subdomain: lower-case and hyphens'),
   adminName: z.string().trim().min(2),
   adminEmail: z.string().email(),
+  // The clinic administrator's password, chosen by the operator onboarding
+  // them rather than generated and read out over the phone.
+  adminPassword: AccountPassword,
   planId: z.string().uuid().nullable().optional(),
   city: z.string().nullable().optional(),
   state: z.string().nullable().optional(),
@@ -364,7 +370,7 @@ export class PlatformController {
     @Body() body: unknown,
   ) {
     const input = parseBody(
-      StateChange.extend({ adminEmail: z.string().email() }),
+      StateChange.extend({ adminEmail: z.string().email(), password: AccountPassword }),
       body,
     );
     return this.support.resetClinicAdminPassword(
@@ -372,6 +378,7 @@ export class PlatformController {
       requireUuid(id, 'Clinic'),
       input.adminEmail,
       input.reason,
+      input.password,
     );
   }
 
@@ -420,10 +427,15 @@ export class PlatformController {
   @UseGuards(PlatformGuard)
   @RequirePlatformRole('PLATFORM_ADMIN')
   @Post('operators/:id/reset-password')
-  resetOperator(@Req() request: PlatformRequest, @Param('id') id: string) {
+  resetOperator(
+    @Req() request: PlatformRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
     return this.admin.resetOperatorPassword(
       request.platformActor!,
       requireUuid(id, 'Operator'),
+      parseBody(SetAccountPassword, body).password,
     );
   }
 

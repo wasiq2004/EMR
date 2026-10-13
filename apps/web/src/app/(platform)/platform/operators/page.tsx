@@ -9,7 +9,7 @@ import {
   useUpdateOperator,
   type OperatorRow,
 } from '@/features/platform/api';
-import { CredentialReveal } from '@/components/ui/credential-reveal';
+import { PasswordPair, passwordProblem } from '@/components/ui/password-pair';
 import { ApiError } from '@/lib/api-client';
 import { formatDateTime, relativeTime } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
@@ -212,35 +212,26 @@ function CreateDialog({
 }) {
   const toast = useToast();
   const create = useCreateOperator();
-  const [form, setForm] = React.useState({ fullName: '', email: '', role: 'SUPPORT' });
-  const [issued, setIssued] = React.useState<string | null>(null);
+  const [form, setForm] = React.useState({ fullName: '', email: '', role: 'SUPPORT', password: '', confirmPassword: '' });
 
   React.useEffect(() => {
     if (open) return;
-    setForm({ fullName: '', email: '', role: 'SUPPORT' });
-    setIssued(null);
+    setForm({ fullName: '', email: '', role: 'SUPPORT', password: '', confirmPassword: '' });
   }, [open]);
 
   const ready =
-    form.fullName.trim().length >= 2 && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email);
+    form.fullName.trim().length >= 2 &&
+    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email) &&
+    passwordProblem(form.password, form.confirmPassword) === null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{issued ? 'Operator created' : 'New operator'}</DialogTitle>
+          <DialogTitle>New operator</DialogTitle>
         </DialogHeader>
 
-        {issued ? (
-          <>
-            <CredentialReveal email={form.email} password={issued} what="operator" />
-            <DialogFooter>
-              <Button variant="primary" onClick={() => onOpenChange(false)}>
-                Done
-              </Button>
-            </DialogFooter>
-          </>
-        ) : (
+        {(
           <>
             <Field label="Full name" htmlFor="op-name" required>
               <Input
@@ -280,6 +271,14 @@ function CreateDialog({
               </Select>
             </Field>
 
+            <PasswordPair
+              idPrefix="op"
+              password={form.password}
+              confirmation={form.confirmPassword}
+              onPassword={(value) => setForm((f) => ({ ...f, password: value }))}
+              onConfirmation={(value) => setForm((f) => ({ ...f, confirmPassword: value }))}
+            />
+
             {form.role === 'PLATFORM_ADMIN' ? (
               <Alert tone="warning" title="This is the most privileged role">
                 It can manage these accounts and reset a clinic administrator&apos;s password,
@@ -298,11 +297,19 @@ function CreateDialog({
                 loading={create.isPending}
                 onClick={() =>
                   create.mutate(
-                    { fullName: form.fullName.trim(), email: form.email.trim(), role: form.role },
                     {
-                      onSuccess: (data) => {
-                        setIssued(data.temporaryPassword);
-                        toast.success('Operator created');
+                      fullName: form.fullName.trim(),
+                      email: form.email.trim(),
+                      role: form.role,
+                      password: form.password,
+                    },
+                    {
+                      onSuccess: () => {
+                        toast.success(
+                          'Operator created',
+                          'They can sign in with the password you set.',
+                        );
+                        onOpenChange(false);
                       },
                       onError: (error) =>
                         toast.error(
@@ -333,12 +340,14 @@ function ManageDialog({
   const update = useUpdateOperator();
   const reset = useResetOperatorPassword();
   const [role, setRole] = React.useState('SUPPORT');
-  const [issued, setIssued] = React.useState<string | null>(null);
+  const [password, setPassword] = React.useState('');
+  const [confirmation, setConfirmation] = React.useState('');
 
   React.useEffect(() => {
     if (!operator) return;
     setRole(operator.role);
-    setIssued(null);
+    setPassword('');
+    setConfirmation('');
   }, [operator]);
 
   return (
@@ -348,9 +357,7 @@ function ManageDialog({
           <DialogTitle>{operator?.fullName}</DialogTitle>
         </DialogHeader>
 
-        {issued && operator ? (
-          <CredentialReveal email={operator.email} password={issued} what="operator" />
-        ) : (
+        {(
           <>
             <p className="token text-xs text-ink-faint">{operator?.email}</p>
 
@@ -377,16 +384,28 @@ function ManageDialog({
               the console cannot be locked out of itself.
             </Alert>
 
+            <PasswordPair
+              idPrefix="manage"
+              label="New password"
+              hint="Leave both blank to change only the role."
+              password={password}
+              confirmation={confirmation}
+              onPassword={setPassword}
+              onConfirmation={setConfirmation}
+            />
+
             <div className="flex flex-wrap gap-2">
               <Button
                 variant="secondary"
+                disabled={passwordProblem(password, confirmation) !== null}
                 loading={reset.isPending}
                 onClick={() =>
                   operator &&
-                  reset.mutate(operator.id, {
-                    onSuccess: (data) => {
-                      setIssued(data.temporaryPassword);
-                      toast.success('Password reset');
+                  reset.mutate({ id: operator.id, password }, {
+                    onSuccess: () => {
+                      toast.success('Password updated', 'Tell them what you set.');
+                      setPassword('');
+                      setConfirmation('');
                     },
                     onError: (error) =>
                       toast.error(error instanceof ApiError ? error.message : 'That did not save'),
@@ -424,9 +443,9 @@ function ManageDialog({
 
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
-            {issued ? 'Done' : 'Cancel'}
+            Close
           </Button>
-          {!issued ? (
+          {(
             <Button
               variant="primary"
               disabled={role === operator?.role}
@@ -448,7 +467,7 @@ function ManageDialog({
             >
               Save role
             </Button>
-          ) : null}
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

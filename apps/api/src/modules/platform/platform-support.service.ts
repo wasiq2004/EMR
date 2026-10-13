@@ -6,7 +6,6 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { eq, sql } from 'drizzle-orm';
-import { randomBytes } from 'node:crypto';
 import pg from 'pg';
 import * as schema from '@emr/db/schema';
 
@@ -61,6 +60,7 @@ export class PlatformSupportService {
       slug: string;
       adminName: string;
       adminEmail: string;
+      adminPassword: string;
       planId?: string | null;
       city?: string | null;
       state?: string | null;
@@ -82,8 +82,8 @@ export class PlatformSupportService {
       throw new ConflictException(`A clinic with the slug "${slug}" already exists.`);
     }
 
-    const temporary = randomBytes(9).toString('base64url');
-    const hash = await this.passwords.hash(temporary);
+    // The operator creating the clinic chooses its administrator's password.
+    const hash = await this.passwords.hash(input.adminPassword);
 
     const client = await pool.connect();
     let clinicId: string;
@@ -191,9 +191,6 @@ export class PlatformSupportService {
     return {
       clinicId,
       slug,
-      // Shown once. Read it out — there is no mail provider, and saying so
-      // beats leaving a new clinic waiting for an email.
-      temporaryPassword: temporary,
       /*
        * False means every optional module is off for this clinic. The console
        * says so on the success screen, because the alternative is a clinic that
@@ -220,6 +217,7 @@ export class PlatformSupportService {
     clinicId: string,
     adminEmail: string,
     reason: string,
+    password: string,
   ) {
     const pool = this.requireAdminConnection();
 
@@ -230,8 +228,7 @@ export class PlatformSupportService {
       .limit(1);
     if (!clinic) throw new NotFoundException('That clinic could not be found.');
 
-    const temporary = randomBytes(9).toString('base64url');
-    const hash = await this.passwords.hash(temporary);
+    const hash = await this.passwords.hash(password);
 
     const result = await pool.query(
       `UPDATE app_user
@@ -261,7 +258,7 @@ export class PlatformSupportService {
       `Clinic admin password reset at ${clinic.name} by ${actor.name}: ${reason}`,
     );
 
-    return { temporaryPassword: temporary };
+    return { ok: true };
   }
 
   /**

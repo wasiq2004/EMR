@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { useOnboardClinic, usePlans } from './api';
-import { CredentialReveal } from '@/components/ui/credential-reveal';
+import { PasswordPair, passwordProblem } from '@/components/ui/password-pair';
 import { ApiError } from '@/lib/api-client';
 import { Button } from '@/components/ui/button';
 import { Field, Input, Select } from '@/components/ui/field';
@@ -55,13 +55,14 @@ export function OnboardClinicDialog({
     state: '',
     contactEmail: '',
     contactPhoneE164: '',
+    adminPassword: '',
+    confirmAdminPassword: '',
   };
 
   const [form, setForm] = React.useState(blank);
   const [slugEdited, setSlugEdited] = React.useState(false);
   const [issued, setIssued] = React.useState<{
     email: string;
-    password: string;
     slug: string;
     /** False means the clinic has no plan, so every optional module is off. */
     planAssigned: boolean;
@@ -89,7 +90,8 @@ export function OnboardClinicDialog({
     form.name.trim().length >= 2 &&
     slugValid &&
     form.adminName.trim().length >= 2 &&
-    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.adminEmail);
+    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.adminEmail) &&
+    passwordProblem(form.adminPassword, form.confirmAdminPassword) === null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -105,11 +107,11 @@ export function OnboardClinicDialog({
               <span className="token">{issued.slug}</span>.
             </p>
 
-            <CredentialReveal
-              email={issued.email}
-              password={issued.password}
-              what="clinic administrator"
-            />
+            <p className="text-sm text-ink-soft">
+              The administrator signs in as{' '}
+              <span className="token">{issued.email}</span> with the password you
+              set.
+            </p>
 
             {/*
               Repeated AFTER creation, not just before it. The warning on the
@@ -189,7 +191,7 @@ export function OnboardClinicDialog({
                 label="Administrator email"
                 htmlFor="onboard-admin-email"
                 required
-                hint="Their sign-in. A one-time password is issued for it."
+                hint="Their sign-in."
               >
                 <Input
                   id="onboard-admin-email"
@@ -199,6 +201,16 @@ export function OnboardClinicDialog({
                 />
               </Field>
             </div>
+
+            <PasswordPair
+              idPrefix="onboard-admin"
+              label="Administrator's password"
+              hint="At least 8 characters. Hand it over with the sign-in address."
+              password={form.adminPassword}
+              confirmation={form.confirmAdminPassword}
+              onPassword={(value) => set({ adminPassword: value })}
+              onConfirmation={(value) => set({ confirmAdminPassword: value })}
+            />
 
             <Field
               label="Plan"
@@ -289,12 +301,12 @@ export function OnboardClinicDialog({
                       state: form.state || null,
                       contactEmail: form.contactEmail || null,
                       contactPhoneE164: form.contactPhoneE164 || null,
+                      adminPassword: form.adminPassword,
                     },
                     {
                       onSuccess: (data) => {
                         setIssued({
                           email: form.adminEmail.trim(),
-                          password: data.temporaryPassword,
                           slug: data.slug,
                           planAssigned: data.planAssigned,
                         });

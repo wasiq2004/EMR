@@ -132,11 +132,12 @@ export function useOnboardClinic() {
       state?: string | null;
       contactEmail?: string | null;
       contactPhoneE164?: string | null;
+      /** The clinic administrator's password, chosen by the operator. */
+      adminPassword: string;
     }) =>
       api.post<{
         clinicId: string;
         slug: string;
-        temporaryPassword: string;
         /** False means no plan, so every optional module is off for this clinic. */
         planAssigned: boolean;
       }>(
@@ -155,14 +156,16 @@ export function useResetClinicAdmin() {
       clinicId,
       adminEmail,
       reason,
+      password,
     }: {
       clinicId: string;
       adminEmail: string;
       reason: string;
+      password: string;
     }) =>
-      api.post<{ temporaryPassword: string }>(
+      api.post<{ ok: true }>(
         `/platform/tenants/${clinicId}/reset-admin-password`,
-        { adminEmail, reason },
+        { adminEmail, reason, password },
       ),
     onSuccess: invalidate,
   });
@@ -197,8 +200,12 @@ export function useOperators() {
 export function useCreateOperator() {
   const invalidate = useInvalidatePlatform();
   return useMutation({
-    mutationFn: (input: { fullName: string; email: string; role: string }) =>
-      api.post<{ id: string; temporaryPassword: string }>('/platform/operators', input),
+    mutationFn: (input: {
+      fullName: string;
+      email: string;
+      role: string;
+      password: string;
+    }) => api.post<{ id: string }>('/platform/operators', input),
     onSuccess: invalidate,
   });
 }
@@ -222,8 +229,8 @@ export function useUpdateOperator() {
 export function useResetOperatorPassword() {
   const invalidate = useInvalidatePlatform();
   return useMutation({
-    mutationFn: (id: string) =>
-      api.post<{ temporaryPassword: string }>(`/platform/operators/${id}/reset-password`, {}),
+    mutationFn: ({ id, password }: { id: string; password: string }) =>
+      api.post<{ ok: true }>(`/platform/operators/${id}/reset-password`, { password }),
     onSuccess: invalidate,
   });
 }

@@ -14,6 +14,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import * as schema from '@emr/db/schema';
 import {
   InviteStaff,
+  SetAccountPassword,
   RecordConsent,
   SaveLocation,
   SaveServiceItem,
@@ -29,7 +30,6 @@ import { ClinicStatusCache } from '../../common/tenancy/clinic-status.cache';
 import { PractitionerCredentialCache } from '../../common/rbac/practitioner-credential.cache';
 import { Audit, RequirePermission } from '../../common/http/decorators';
 import { parseBody, requireUuid } from '../../common/http/zod.pipe';
-import { randomBytes } from 'node:crypto';
 
 @Injectable()
 export class SettingsService {
@@ -145,15 +145,18 @@ export class SettingsService {
   /**
    * Invites a staff member.
    *
-   * Returns a one-time password rather than emailing one, because no mail
-   * provider is connected. Saying so plainly beats pretending an email was
-   * sent — an administrator can read it out, and it must be changed on first
-   * sign-in.
+   * THE ADMINISTRATOR CHOOSES THE PASSWORD. This used to generate a random
+   * string and hand it back to be read out. It was secure and it was disliked
+   * for a good reason: setting up five people meant relaying five unreadable
+   * strings, usually over a counter, usually written on paper.
+   *
+   * Nothing is returned now except the account. The administrator typed the
+   * password, so there is nothing to show them — which also removes the screen
+   * that had to display a secret, and the bug where it did not.
    */
-  async invite(input: Record<string, unknown>): Promise<{ user: StaffUser; temporaryPassword: string }> {
+  async invite(input: Record<string, unknown>): Promise<{ user: StaffUser }> {
     const ctx = TenantContext.require();
-    const temporary = randomBytes(9).toString('base64url');
-    const hash = await this.passwords.hash(temporary);
+    const hash = await this.passwords.hash(String(input.password));
 
     const user = await this.tenantDb.run(async (tx) => {
       /*
@@ -208,7 +211,6 @@ export class SettingsService {
         createdAt: user.createdAt.toISOString(),
         updatedAt: user.updatedAt.toISOString(),
       } as unknown as StaffUser,
-      temporaryPassword: temporary,
     };
   }
 
@@ -261,9 +263,8 @@ export class SettingsService {
    * The operator reset in `platform-admin.service.ts` already writes null here.
    * These two paths do the same job and now agree.
    */
-  async resetPassword(userId: string): Promise<{ temporaryPassword: string }> {
-    const temporary = randomBytes(9).toString('base64url');
-    const hash = await this.passwords.hash(temporary);
+  async resetPassword(userId: string, password: string): Promise<void> {
+    const hash = await this.passwords.hash(password);
 
     await this.tenantDb.run(async (tx) => {
       const changed = await tx
@@ -301,8 +302,6 @@ export class SettingsService {
         );
       }
     });
-
-    return { temporaryPassword: temporary };
   }
 
   async services(): Promise<ServiceItem[]> {
@@ -586,8 +585,10 @@ class SettingsController {
   @RequirePermission('user:update')
   @Audit('PASSWORD_RESET', 'user')
   @Post('users/:id/reset-password')
-  reset(@Param('id') id: string) {
-    return this.settings.resetPassword(requireUuid(id, 'Staff member'));
+  async reset(@Param('id') id: string, @Body() body: unknown) {
+    const input = parseBody(SetAccountPassword, body);
+    await this.settings.resetPassword(requireUuid(id, 'Staff member'), input.password);
+    return { ok: true };
   }
 
   @RequirePermission('clinic:read')

@@ -117,10 +117,66 @@ export const SaveLocation = z.object({
 });
 export type SaveLocation = z.infer<typeof SaveLocation>;
 
+/**
+ * Every password anyone types, anywhere in the product.
+ *
+ * ONE RULE, deliberately. Passwords used to be generated: the server made a
+ * random string, the administrator read it out, and the staff member changed it
+ * on first sign-in. That was secure and nobody liked it — an administrator
+ * setting up five people had five unreadable strings to relay, and the one
+ * thing they could not do was pick something the person would remember for the
+ * ten minutes before they changed it.
+ *
+ * So the administrator types it now, and this is the whole policy: long enough
+ * to be worth typing, short of the obvious, and nothing else. No character
+ * classes, no forced symbols — those rules are well known to push people toward
+ * `Password1!` and a sticky note, which is worse than what they prevent.
+ *
+ * The real protection against guessing is not here: sign-in locks an account
+ * after repeated failures, which is what actually stops somebody working
+ * through a list.
+ */
+const OBVIOUS = [
+  'password',
+  'password1',
+  'password123',
+  '12345678',
+  '123456789',
+  'qwertyuiop',
+  'iloveyou',
+  'welcome1',
+  'admin123',
+  'letmein123',
+  'clinic123',
+  'hospital123',
+];
+
+export const AccountPassword = z
+  .string()
+  .min(8, 'Use at least 8 characters')
+  // Argon2 has no practical input limit, but an unbounded field is a way to
+  // make the server spend CPU hashing megabytes.
+  .max(200, 'That is longer than 200 characters')
+  .refine((v) => new Set(v).size >= 4, {
+    message: 'Use a few more different characters',
+  })
+  .refine((v) => !OBVIOUS.includes(v.trim().toLowerCase()), {
+    message: 'That one is on every guessing list. Pick something else.',
+  });
+
+/** Setting or resetting somebody else's password, as an administrator. */
+export const SetAccountPassword = z.object({ password: AccountPassword });
+export type SetAccountPassword = z.infer<typeof SetAccountPassword>;
+
 export const InviteStaff = z.object({
   fullName: z.string().trim().min(2, 'Enter a name'),
   email: z.string().email('Enter a valid email'),
   role: UserRole,
+  /*
+   * Chosen by the administrator creating the account, not generated. They are
+   * usually standing next to the person, so they can hand it over directly.
+   */
+  password: AccountPassword,
   mobileE164: PhoneE164.nullable().default(null),
   medicalRegistrationNumber: z.string().nullable().default(null),
   medicalCouncil: z.string().nullable().default(null),
@@ -184,12 +240,7 @@ export type LoginInput = z.infer<typeof LoginInput>;
 export const ChangePasswordInput = z
   .object({
     currentPassword: z.string().min(1, 'Enter your current password'),
-    newPassword: z
-      .string()
-      .min(12, 'Use at least 12 characters')
-      // Argon2 has no practical input limit, but an unbounded field is a way to
-      // make the server spend CPU hashing megabytes.
-      .max(200, 'That is longer than 200 characters'),
+    newPassword: AccountPassword,
   })
   .refine((v) => v.newPassword !== v.currentPassword, {
     message: 'The new password is the same as the current one',

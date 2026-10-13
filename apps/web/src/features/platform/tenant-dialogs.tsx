@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { FEATURES, resolveFeatures } from '@emr/contracts';
 import { usePlans, useResetClinicAdmin, useSetFeatures } from './api';
-import { CredentialReveal } from '@/components/ui/credential-reveal';
+import { PasswordPair, passwordProblem } from '@/components/ui/password-pair';
 import { ApiError } from '@/lib/api-client';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -230,13 +230,15 @@ export function ResetAdminDialog({
   const reset = useResetClinicAdmin();
   const [email, setEmail] = React.useState('');
   const [reason, setReason] = React.useState('');
-  const [issued, setIssued] = React.useState<string | null>(null);
+  const [password, setPassword] = React.useState('');
+  const [confirmation, setConfirmation] = React.useState('');
 
   React.useEffect(() => {
     if (open) return;
     setEmail('');
     setReason('');
-    setIssued(null);
+    setPassword('');
+    setConfirmation('');
   }, [open]);
 
   return (
@@ -246,20 +248,7 @@ export function ResetAdminDialog({
           <DialogTitle>Reset an administrator password</DialogTitle>
         </DialogHeader>
 
-        {issued ? (
-          <>
-            <CredentialReveal
-              email={email}
-              password={issued}
-              what={`administrator at ${clinicName}`}
-            />
-            <DialogFooter>
-              <Button variant="primary" onClick={() => onOpenChange(false)}>
-                Done
-              </Button>
-            </DialogFooter>
-          </>
-        ) : (
+        {(
           <>
             <Alert tone="warning" title="This hands somebody a working credential">
               Use it only when the clinic has nobody who can let their administrator back
@@ -290,21 +279,38 @@ export function ResetAdminDialog({
               />
             </Field>
 
+            <PasswordPair
+              idPrefix="tenant-admin"
+              label="New password"
+              hint="At least 8 characters. Give it to them directly."
+              password={password}
+              confirmation={confirmation}
+              onPassword={setPassword}
+              onConfirmation={setConfirmation}
+            />
+
             <DialogFooter>
               <Button variant="ghost" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
               <Button
                 variant="critical"
-                disabled={!EMAIL.test(email) || reason.trim().length < 10}
+                disabled={
+                  !EMAIL.test(email) ||
+                  reason.trim().length < 10 ||
+                  passwordProblem(password, confirmation) !== null
+                }
                 loading={reset.isPending}
                 onClick={() =>
                   reset.mutate(
-                    { clinicId, adminEmail: email, reason },
+                    { clinicId, adminEmail: email, reason, password },
                     {
-                      onSuccess: (data) => {
-                        setIssued(data.temporaryPassword);
-                        toast.success('Password reset');
+                      onSuccess: () => {
+                        toast.success(
+                          'Password updated',
+                          `Give it to the administrator at ${clinicName} directly.`,
+                        );
+                        onOpenChange(false);
                       },
                       onError: (error) =>
                         toast.error(

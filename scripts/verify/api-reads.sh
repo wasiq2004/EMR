@@ -279,33 +279,49 @@ echo "-- A PASSWORD CHANGE HAS TO REACH THE DATABASE --"
 # in the suite depends on.
 login owner@$VERIFY_DOMAIN
 PWMAIL="pwcheck.$RANDOM$RANDOM@$VERIFY_DOMAIN"
-req POST /users "{\"fullName\":\"Password Path Check\",\"email\":\"$PWMAIL\",\"role\":\"RECEPTIONIST\"}"
-check "create a throwaway account" 201 "$CODE" "$BODY"
+CHOSEN_AT_CREATE="desk-counter-$RANDOM"
+req POST /users "{\"fullName\":\"Password Path Check\",\"email\":\"$PWMAIL\",\"role\":\"RECEPTIONIST\",\"password\":\"$CHOSEN_AT_CREATE\"}"
+check "create a throwaway account with a chosen password" 201 "$CODE" "$BODY"
 PWUSER=$(printf '%s' "$BODY" | grep -o '"id":"[0-9a-f-]\{36\}"' | head -1 | cut -d'"' -f4)
-ISSUED=$(printf '%s' "$BODY" | grep -o '"temporaryPassword":"[^"]*"' | head -1 | cut -d'"' -f4)
 
-# The invite must return a password, and it must be the one that works.
-[ -n "$ISSUED" ] \
-  && check "the invite returns a one-time password" y y \
-  || check "the invite returns a one-time password" y n "$BODY"
+# NOTHING COMES BACK. The server used to generate the password and return it;
+# the administrator types it now, so a response carrying one would mean the
+# generation path is still live somewhere.
+printf '%s' "$BODY" | grep -q temporaryPassword \
+  && check "no password is echoed back" n y "$BODY" \
+  || check "no password is echoed back" n n
 
 rm -f "$J"
-req POST /auth/login "{\"email\":\"$PWMAIL\",\"password\":\"$ISSUED\"}"
-check "the issued password actually signs in" 201 "$CODE" "$BODY"
+req POST /auth/login "{\"email\":\"$PWMAIL\",\"password\":\"$CHOSEN_AT_CREATE\"}"
+check "THE PASSWORD THE ADMINISTRATOR TYPED SIGNS IN" 201 "$CODE" "$BODY"
+
+echo "-- what the password rule refuses --"
+login owner@$VERIFY_DOMAIN
+req POST /users "{\"fullName\":\"Too Short\",\"email\":\"short.$RANDOM@$VERIFY_DOMAIN\",\"role\":\"RECEPTIONIST\",\"password\":\"abc123\"}"
+check "under 8 characters is refused" 422 "$CODE" "$BODY"
+req POST /users "{\"fullName\":\"Too Few\",\"email\":\"few.$RANDOM@$VERIFY_DOMAIN\",\"role\":\"RECEPTIONIST\",\"password\":\"aaaaaaaaaa\"}"
+check "ten of the same character is refused" 422 "$CODE" "$BODY"
+req POST /users "{\"fullName\":\"Too Obvious\",\"email\":\"obv.$RANDOM@$VERIFY_DOMAIN\",\"role\":\"RECEPTIONIST\",\"password\":\"password123\"}"
+check "one off every guessing list is refused" 422 "$CODE" "$BODY"
+# And nothing beyond that. No character classes, no symbols, no mixed case —
+# those rules push people to Password1! and a sticky note.
+req POST /users "{\"fullName\":\"Plain Words\",\"email\":\"plain.$RANDOM@$VERIFY_DOMAIN\",\"role\":\"RECEPTIONIST\",\"password\":\"reception desk monday\"}"
+check "a plain passphrase with no symbols is accepted" 201 "$CODE" "$BODY"
 
 echo "-- changing your own password --"
-# Still signed in as the throwaway account from the login above.
+rm -f "$J"
+req POST /auth/login "{\"email\":\"$PWMAIL\",\"password\":\"$CHOSEN_AT_CREATE\"}"
 req POST /auth/change-password '{"currentPassword":"wrong-current-password","newPassword":"a-perfectly-fine-new-one"}'
 check "a wrong current password is refused" 401 "$CODE" "$BODY"
 
-req POST /auth/change-password "{\"currentPassword\":\"$ISSUED\",\"newPassword\":\"short\"}"
-check "a new password under 12 characters is refused" 422 "$CODE" "$BODY"
+req POST /auth/change-password "{\"currentPassword\":\"$CHOSEN_AT_CREATE\",\"newPassword\":\"short\"}"
+check "a new password under 8 characters is refused" 422 "$CODE" "$BODY"
 
-req POST /auth/change-password "{\"currentPassword\":\"$ISSUED\",\"newPassword\":\"$ISSUED\"}"
+req POST /auth/change-password "{\"currentPassword\":\"$CHOSEN_AT_CREATE\",\"newPassword\":\"$CHOSEN_AT_CREATE\"}"
 check "reusing the current password is refused" 422 "$CODE" "$BODY"
 
 CHOSEN="chosen-by-the-user-$RANDOM"
-req POST /auth/change-password "{\"currentPassword\":\"$ISSUED\",\"newPassword\":\"$CHOSEN\"}"
+req POST /auth/change-password "{\"currentPassword\":\"$CHOSEN_AT_CREATE\",\"newPassword\":\"$CHOSEN\"}"
 check "the password changes" 201 "$CODE" "$BODY"
 printf '%s' "$BODY" | grep -q 'otherSessionsRevoked' \
   && check "and it reports how many sessions it signed out" y y \
@@ -317,42 +333,38 @@ req POST /auth/login "{\"email\":\"$PWMAIL\",\"password\":\"$CHOSEN\"}"
 check "THE NEW PASSWORD SIGNS IN" 201 "$CODE" "$BODY"
 
 rm -f "$J"
-req POST /auth/login "{\"email\":\"$PWMAIL\",\"password\":\"$ISSUED\"}"
+req POST /auth/login "{\"email\":\"$PWMAIL\",\"password\":\"$CHOSEN_AT_CREATE\"}"
 check "and the old one no longer does" 401 "$CODE" "$BODY"
 
-echo "-- an administrator issuing a new password --"
+echo "-- an administrator setting a new password --"
 login owner@$VERIFY_DOMAIN
-req POST "/users/$PWUSER/reset-password" '{}'
-check "the administrator can issue one" 201 "$CODE" "$BODY"
-RESET=$(printf '%s' "$BODY" | grep -o '"temporaryPassword":"[^"]*"' | head -1 | cut -d'"' -f4)
-[ -n "$RESET" ] \
-  && check "and it comes back in the response" y y \
-  || check "and it comes back in the response" y n "$BODY"
-# Not the same string twice: a reset that returned a constant would pass every
-# other assertion here.
-[ "$RESET" != "$CHOSEN" ] \
-  && check "it is a different password from the old one" y y \
-  || check "it is a different password from the old one" y n
+RESET="reset-by-the-admin-$RANDOM"
+req POST "/users/$PWUSER/reset-password" "{\"password\":\"$RESET\"}"
+check "the administrator can set one" 201 "$CODE" "$BODY"
+printf '%s' "$BODY" | grep -q temporaryPassword \
+  && check "and still echoes nothing back" n y "$BODY" \
+  || check "and still echoes nothing back" n n
 
 rm -f "$J"
 req POST /auth/login "{\"email\":\"$PWMAIL\",\"password\":\"$RESET\"}"
-check "THE ISSUED PASSWORD SIGNS IN" 201 "$CODE" "$BODY"
+check "THE PASSWORD THE ADMINISTRATOR SET SIGNS IN" 201 "$CODE" "$BODY"
 
 rm -f "$J"
 req POST /auth/login "{\"email\":\"$PWMAIL\",\"password\":\"$CHOSEN\"}"
 check "and the one it replaced does not" 401 "$CODE" "$BODY"
 
-# A reset for somebody who is not there must not report success with a password
-# it stored nowhere. This is the row-count check.
+# A reset for somebody who is not there must not report success. This is the
+# row-count check — and the password has to be VALID, or the body is rejected
+# before the lookup ever runs and this would pass as a 422 for the wrong reason.
 login owner@$VERIFY_DOMAIN
-req POST "/users/00000000-0000-0000-0000-000000000000/reset-password" '{}'
+req POST "/users/00000000-0000-0000-0000-000000000000/reset-password" '{"password":"a-valid-one-here"}'
 check "a reset for a non-existent user is refused" 404 "$CODE" "$BODY"
 
 echo "-- who may change whose --"
 # Reception can change its OWN password and holds no user:update, so it cannot
 # reset anybody else's.
 login reception@$VERIFY_DOMAIN
-req POST "/users/$PWUSER/reset-password" '{}'
+req POST "/users/$PWUSER/reset-password" '{"password":"a-valid-one-here"}'
 check "reception cannot reset another account" 403 "$CODE" "$BODY"
 
 # But the change-password route is open to every authenticated role — including
