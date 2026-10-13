@@ -14,6 +14,7 @@ import {
   type DiagnosisCatalogueItem,
   type Encounter,
 } from '@emr/contracts';
+import { redactEncounter } from '../../common/rbac/redact';
 import { TenantDb } from '../../common/tenancy/tenant-db.service';
 import { TenantContext } from '../../common/tenancy/tenant-context';
 import { RemindersService } from '../reminders/reminders.service';
@@ -107,7 +108,17 @@ export class ClinicalService {
     });
   }
 
+  /**
+   * One consultation.
+   *
+   * The route is guarded on `encounter:read`, which reception and the pharmacy
+   * counter both hold on purpose — they need to know a visit happened. Neither
+   * holds `encounterClinicalContent:read`, so the narrative is blanked here.
+   * The query selects every column because the doctor's screen needs every
+   * column; the filtering is by role, on the way out.
+   */
   async byId(id: string): Promise<Encounter> {
+    const ctx = TenantContext.require();
     const row = await this.tenantDb.runReadOnly(async (tx) => {
       const [found] = await tx
         .select()
@@ -117,7 +128,7 @@ export class ClinicalService {
       return found;
     });
     if (!row) throw new NotFoundException('That consultation could not be found.');
-    return serialise(row);
+    return redactEncounter(serialise(row), ctx.role);
   }
 
   async updateDraft(id: string, patch: Record<string, unknown>, version?: number) {
@@ -337,6 +348,7 @@ export class ClinicalService {
   }
 
   async visitsFor(patientId: string): Promise<Encounter[]> {
+    const ctx = TenantContext.require();
     const rows = await this.tenantDb.runReadOnly((tx) =>
       tx
         .select()
@@ -344,7 +356,9 @@ export class ClinicalService {
         .where(eq(schema.encounter.patientId, patientId))
         .orderBy(desc(schema.encounter.startedAt)),
     );
-    return rows.map(serialise);
+    // Same reasoning as `byId`. A visit LIST is the likeliest of the two to be
+    // opened by somebody at the front desk.
+    return rows.map((row) => redactEncounter(serialise(row), ctx.role));
   }
 
   /* --- Observations, conditions, allergies ------------------------------- */

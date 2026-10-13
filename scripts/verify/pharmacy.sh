@@ -49,8 +49,16 @@ check "and the stock" 200 "$CODE" "$BODY"
 
 # The counter reads a patient's name, age and allergies — enough to hand the
 # right medicine to the right person — and nothing clinical beyond that.
+#
+# THIS ASSERTION USED TO EXPECT 403, and it was wrong in a way worth recording.
+# The counter DOES hold `encounter:read`, deliberately, so it can tell which
+# visit an order came from — so the route answers, and a missing record is a
+# 404. The guarantee is not that the route is shut; it is that the body carries
+# no clinical narrative. Asserting the status here hid that for as long as the
+# suite went unrun, and the real check now lives in consultation-flow.sh
+# against an encounter that actually has a note in it.
 req GET /encounters/00000000-0000-0000-0000-000000000000
-check "but not a consultation" 403 "$CODE" "$BODY"
+check "the counter may ask about a visit, so a missing one is 404 not 403" 404 "$CODE" "$BODY"
 
 login reception@$VERIFY_DOMAIN
 req GET /pharmacy/stock

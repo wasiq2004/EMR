@@ -37,12 +37,24 @@ of the asks land differently than they read.
 - [x] **D3 — Follows from D1.** A balance that any till can settle is visible
       wherever the patient is, so the desk can ask for it at the natural moment
       rather than chasing it. Consultation fee still collected at check-in.
-- [x] **D4 — Emergency is the priority, and must be fast to reach.**
-      Built as a dedicated area inside the clinic panel rather than a fourth
-      panel with its own session: same single click for the receptionist,
-      without another layout and another session boundary on a product we have
-      agreed is too complex. Say the word if you want a genuinely separate
-      panel and it can be promoted.
+- [x] **D4 — A screen inside the clinic panel, CONFIRMED 2026-10-13.**
+      Not a fourth panel. The receptionist reaches it in one click from a red
+      button in the header, never leaves the clinic shell, and lands back on the
+      queue with the patient at the top.
+
+      Recording how this was settled, because it was nearly got wrong: the brief
+      said "emergency panel" twice, I recommended a screen instead, and then
+      marked my own recommendation as the decision. It was not mine to make. It
+      was put properly and the screen was chosen — but the lesson is that
+      "answered" in this file must mean somebody answered it.
+
+      All nine diagrams were regenerated on 2026-10-13 so they describe what is
+      actually built. `docs/panels-and-access.svg` gained an Emergency admission
+      row, SPECIAL for the four roles that hold the permission and NONE for the
+      other five, and the emergency path is now in the receptionist, nurse,
+      doctor and clinic-admin flows. The other four flows say nothing about it
+      because those roles cannot do it — the diagrams are generated from the
+      RBAC table, so that silence is the grant list, not an omission.
 - [x] **D5 — Minimal identity, taken as proposed.** A label is enough: a name,
       or "Unknown male, approx 40". Gender defaults to the UNKNOWN the enum
       already has, age is optional, and the rest is completed afterwards.
@@ -198,10 +210,39 @@ counter settle one balance".
 
 ## While we are here
 
-- [ ] `scripts/verify/pharmacy.sh` asserts a pharmacist gets 403 on
-      `GET /encounters/:id`. RBAC grants PHARMACIST `encounter:read` on purpose,
-      so that assertion is wrong and will fail on the next run. Fix the
-      assertion, not the permission.
+- [x] **That wrong assertion was covering a real PHI leak. Fixed 2026-10-13.**
+      The note said to fix the assertion, not the permission. Both were right —
+      and the thing the assertion was groping for turned out to be broken.
+
+      `GET /encounters/:id` is guarded on `encounter:read`, which RECEPTIONIST
+      and PHARMACIST both hold deliberately, and the handler was commented
+      *"Metadata only. Reception can see that a visit happened, not what was
+      said."* The query underneath it was `select()` — every column, the whole
+      SOAP note. The comment was the intent and the query was the behaviour.
+
+      `GET /patients/:id/snapshot` was worse, because it is guarded on
+      `patient:read` alone while carrying allergies, diagnoses, active
+      medications, vitals and chief complaints. One permission was standing in
+      for five, and the four it was covering for are the ones `rbac.ts` lists as
+      DELIBERATELY ABSENT from exactly those two roles. `GET /patients/:id/visits`
+      had the same `select()` as `byId`.
+
+      Nothing could have caught this. Every status code was correct, every route
+      guard was correct, and the payload simply contained more than the guard
+      implied. The one check pointed anywhere near it asserted a 403 that the
+      matrix says should be a 200 — so it would have failed for the wrong
+      reason and been "fixed" by relaxing it to 200, which is how the leak
+      would have been ratified.
+
+      Fix: `apps/api/src/common/rbac/redact.ts`, field-level redaction driven by
+      `can()` rather than by the route, applied in all three places. Allergies
+      deliberately survive for the pharmacy counter — that is the entire reason
+      PHARMACIST holds `allergy:read`, and penicillin is the case it is there
+      for. 12 unit tests enumerate PERMISSION_MATRIX itself rather than a list
+      retyped in the test, so a role added later is covered without anybody
+      remembering this file. 25 assertions added to `consultation-flow.sh`
+      against an encounter that actually has a note in it, because the
+      guarantee is about a body, not a status.
 
 ---
 

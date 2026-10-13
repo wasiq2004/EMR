@@ -14,6 +14,7 @@ import {
   type PatientSnapshot,
   type PatientSummary,
 } from '@emr/contracts';
+import { redactSnapshot } from '../../common/rbac/redact';
 import { TenantDb } from '../../common/tenancy/tenant-db.service';
 import { TenantContext } from '../../common/tenancy/tenant-context';
 
@@ -277,7 +278,18 @@ export class PatientsService {
    * full render in under a second — below that doctors stop opening it, and the
    * allergy lives here.
    */
+  /**
+   * The chart sidebar.
+   *
+   * One route, guarded on `patient:read`, carrying five different kinds of
+   * clinical data. That made `patient:read` an alias for four permissions that
+   * `rbac.ts` deliberately withholds from reception and the pharmacy counter,
+   * so each section is filtered against its own permission before it leaves.
+   * Allergies survive for the counter, which is the whole reason that role
+   * holds `allergy:read`.
+   */
   async snapshot(patientId: string): Promise<PatientSnapshot> {
+    const ctx = TenantContext.require();
     return this.tenantDb.runReadOnly(async (tx) => {
       const [patient] = await tx
         .select()
@@ -347,7 +359,7 @@ export class PatientsService {
         .from(schema.condition)
         .where(eq(schema.condition.patientId, patientId));
 
-      return {
+      const snapshot = {
         patientId,
         // Highest criticality first. The doctor reads the top of this list.
         allergies: allergies.sort(
@@ -379,6 +391,8 @@ export class PatientsService {
           0,
         ),
       } as PatientSnapshot;
+
+      return redactSnapshot(snapshot, ctx.role);
     });
   }
 

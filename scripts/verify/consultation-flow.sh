@@ -560,6 +560,85 @@ req GET "/invoices?patientId=$NEW_PID"
 check "the patient's billing tab lists their invoices" 200 "$CODE" "$BODY"
 printf '%s' "$BODY" | grep -q "$VINV"   && check "including the one raised from the visit" y y   || check "including the one raised from the visit" y n
 
+echo "-- the note is readable by fewer people than the visit --"
+#
+# `encounter:read` and `encounterClinicalContent:read` are two permissions on
+# purpose. Reception and the pharmacy counter hold the first so they can see
+# that a visit happened; neither holds the second.
+#
+# This went wrong in a way nothing could catch: the route guard was right, the
+# handler was commented "Metadata only", and the query said `select()` — every
+# column, SOAP note included. A 200 was the correct status and the body was
+# the bug. So these assertions are about the BODY, not the code.
+
+CC="Fever and sore throat"
+
+login doctor@$VERIFY_DOMAIN
+req GET "/encounters/$ENC"
+check "the doctor who wrote it reads the note" 200 "$CODE" "$BODY"
+printf '%s' "$BODY" | grep -q "$CC" \
+  && check "and the complaint is actually in the body" y y \
+  || check "and the complaint is actually in the body" y n "$BODY"
+
+for who in reception pharmacist; do
+  login $who@$VERIFY_DOMAIN
+  req GET "/encounters/$ENC"
+  # 200, NOT 403. They are allowed to know the visit exists.
+  check "$who can still see that the visit happened" 200 "$CODE" "$BODY"
+  printf '%s' "$BODY" | grep -q "\"id\":\"$ENC\"" \
+    && check "$who gets the visit metadata" y y \
+    || check "$who gets the visit metadata" y n "$BODY"
+  # And this is the assertion that was missing entirely.
+  printf '%s' "$BODY" | grep -q "$CC" \
+    && check "$who MUST NOT receive the clinical note" n y "$BODY" \
+    || check "$who MUST NOT receive the clinical note" n n
+  printf '%s' "$BODY" | grep -q '"chiefComplaint":null' \
+    && check "$who sees it blanked rather than omitted" y y \
+    || check "$who sees it blanked rather than omitted" y n "$BODY"
+done
+
+echo "-- the visit list leaks the same way, so it is checked the same way --"
+login reception@$VERIFY_DOMAIN
+req GET "/patients/$NEW_PID/visits"
+check "reception lists the patient's visits" 200 "$CODE" "$BODY"
+printf '%s' "$BODY" | grep -q "$CC" \
+  && check "and no note comes with the list" n y "$BODY" \
+  || check "and no note comes with the list" n n
+
+echo "-- one route was standing in for five permissions --"
+#
+# The snapshot carries allergies, diagnoses, medications and vitals behind a
+# single `patient:read`, which reception and the counter both hold. Each
+# section now answers to its own permission.
+
+req GET "/patients/$NEW_PID/snapshot"
+check "reception can open the snapshot" 200 "$CODE" "$BODY"
+printf '%s' "$BODY" | grep -qi "38.6" \
+  && check "but reception MUST NOT receive the vitals" n y "$BODY" \
+  || check "but reception MUST NOT receive the vitals" n n
+printf '%s' "$BODY" | grep -q "$CC" \
+  && check "nor the complaint on the recent visits" n y "$BODY" \
+  || check "nor the complaint on the recent visits" n n
+printf '%s' "$BODY" | grep -q '"outstandingPaise"' \
+  && check "and the balance, which is the desk's own business, survives" y y \
+  || check "and the balance, which is the desk's own business, survives" y n "$BODY"
+
+login pharmacist@$VERIFY_DOMAIN
+req GET "/patients/$NEW_PID/snapshot"
+check "the counter can open the snapshot" 200 "$CODE" "$BODY"
+printf '%s' "$BODY" | grep -q "$CC"   && check "and gets no complaint either" n y "$BODY"   || check "and gets no complaint either" n n
+
+# Lakshmi is the penicillin-allergic fixture patient. Asserted against HER
+# record because an empty allergy list on a patient with no allergies would
+# pass this test while proving nothing.
+req GET "/patients/$LAK/snapshot"
+check "the counter opens the allergic patient's snapshot" 200 "$CODE" "$BODY"
+printf '%s' "$BODY" | grep -qi penicillin   && check "ALLERGIES SURVIVE FOR THE COUNTER (the whole point of allergy:read)" y y   || check "ALLERGIES SURVIVE FOR THE COUNTER (the whole point of allergy:read)" y n "$BODY"
+
+login reception@$VERIFY_DOMAIN
+req GET "/patients/$LAK/snapshot"
+printf '%s' "$BODY" | grep -qi penicillin   && check "reception, which holds no allergy:read, does not" n y "$BODY"   || check "reception, which holds no allergy:read, does not" n n
+
 echo
 echo "  $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
