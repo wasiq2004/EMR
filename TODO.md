@@ -63,30 +63,43 @@ of mine marked as somebody's decision.
       named in text beside the colour, per the `color-not-only` rule — colour is
       never the only carrier.
 
-## Blocks, in order
+## Blocks — ALL BUILT 2026-10-14
 
-### P-A. A panel registry, and identity at the three touchpoints
+Four checkpoints: `4b81fb2`, `da58848`, `916e4a2`, `e63f422`.
+
+
+### P-A. A panel registry, and identity at the three touchpoints  ·  DONE
 One module describing each panel: name, mark, accent, landing route, primary
 action. Everything else reads from it, so a panel cannot drift from its own
 definition the way the sidebar would have drifted from the permission matrix.
 Touches `lib/nav.ts`, `layout/sidebar.tsx`, `ui/surface.tsx`.
 
-### P-B. The landing states the day, not a greeting
+### P-B. The landing states the day, not a greeting  ·  DONE
 `PageHeader` on `/today` becomes the state of the work — "Front desk · 6
 waiting · 2 unpaid" — with the name demoted to the top bar where it already
 appears. Each role home gets the counts it actually acts on.
 
-### P-C. One primary action per panel, in a fixed position
+### P-C. One primary action per panel, in a fixed position  ·  DONE, AMENDED
 Reception books, the doctor starts the next consultation, nursing records the
 next vitals, pharmacy dispenses next. Emergency stays the red exception already
 in the header, and keeps being the only thing that colour-shouts.
 
-### P-D. Navigation ordered by the day
+**AMENDED WHILE BUILDING.** "One per panel" was wrong for two of them. The
+doctor's home opens on the next patient with the open-consultation control
+already on the row, and nursing opens on the vitals list — a header button
+there is a second way to do what the screen is already shouting, which is the
+equal-weight clutter this whole exercise exists to remove. Doctor, Nursing,
+Clinic Admin and Compliance have no primary action. Pharmacy's became Counter
+sale, because "Dispense next" would have pointed at the page it was printed on.
+The rule that survived: the primary action is what STARTS new work, and if the
+landing already leads with the work there is nothing to add.
+
+### P-D. Navigation ordered by the day  ·  DONE
 The identical first four links are the plainest symptom. Nursing should open on
 vitals, the desk on the queue and billing. Same screens, different order and
 different first item.
 
-### P-E. Density and rhythm pass
+### P-E. Density and rhythm pass  ·  DONE
 The dashboard screens use one uniform `gap-4`. Move to the skill's density-8
 scale (8–32px) so section, card and field spacing stop being equal, which is
 what makes a dense screen readable rather than merely full.
@@ -97,6 +110,33 @@ what makes a dense screen readable rather than merely full.
 - No new screens. P1 adds no routes — it differentiates ones that exist.
 - No change to the permission matrix. Presentation is the subject here; who may
   see what was settled separately and is enforced server-side.
+
+## What it cost, and what is verified
+
+- 207 web tests, up from 178. The 29 new ones are the two things this work
+  could have broken silently: 21 contrast assertions covering all seven panel
+  tints in light, toggled dark and system dark, and 8 navigation-order
+  assertions including "no two panels open on the same list" and "promotion
+  moves a link rather than copying it".
+- `theme.test.ts` could not previously see the panel tints at all — it checks an
+  explicit pair list, and the tints live on `[data-panel]` selectors rather than
+  in the theme blocks. 21 new colour triples had shipped unverified for exactly
+  one commit.
+- The ordering tests immediately earned their place: `'/settings'` was in the
+  Clinic Admin lead list and silently matched nothing, because the real href is
+  `/settings/clinic`. A skipped lead route is not an error, so nothing else
+  would have said so.
+
+## Still not verified
+
+Visual confirmation. Every claim above is from the build, the type checker and
+the tests; nobody has LOOKED at these screens. The panel tints are verified for
+contrast ratio, not for whether seven of them sitting beside each other look
+deliberate. That needs Docker and a browser pass.
+
+Staff already using the product will notice P-D on their next sign-in: the
+sidebar order changes for all four clinic roles. That is the intended change
+and the one item here with a muscle-memory cost.
 
 ---
 
