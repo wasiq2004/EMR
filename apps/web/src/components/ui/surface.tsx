@@ -82,6 +82,15 @@ export function PageHeader({
       {breadcrumb}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
+          {/*
+            TOUCHPOINT 3 of 3 — a short rule in the panel's colour above the
+            title. Decorative, so it is hidden from assistive technology: the
+            panel is already named in the sidebar and the heading already says
+            where you are. This is for the eye landing on a screen it has seen
+            a hundred times and needing to know, in one glance, which workspace
+            it is looking at.
+          */}
+          <span className="mb-2 block h-0.5 w-8 rounded-full bg-panel" aria-hidden />
           <h1 className="text-xl font-semibold tracking-tight text-ink text-balance">
             {title}
           </h1>

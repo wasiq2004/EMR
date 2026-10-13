@@ -1,3 +1,105 @@
+# PANEL PRESENTATION — plan, 2026-10-13
+
+The complaint was that the panels "look vague". They do, and it is not a styling
+problem. Two independent checks say the visual foundation is already right:
+
+  - The `ui-ux-pro-max` dataset resolves this product to **Minimalism & Swiss
+    Style** ("best for: enterprise apps, dashboards, professional tools"). That
+    is what the app already is.
+  - It recommends **Atkinson Hyperlegible** for healthcare. The app has shipped
+    that font since the first build.
+
+So the palette, the font and the component library are NOT changing. The
+dataset's other suggestion — "Healthcare App → Neumorphism + Claymorphism" — is
+rejected on purpose: that profile is for consumer wellness apps, and
+neumorphism's low-contrast surfaces contradict the same skill's §1 contrast
+rules for software that staff read all day.
+
+## What is actually wrong
+
+Measured from `nav.ts` against PERMISSION_MATRIX, not from impression:
+
+| Panel        | Sections | Links | First four links                            |
+|--------------|----------|-------|---------------------------------------------|
+| Front Desk   | 6        | 11    | Today, Queue, Calendar, Appointment list    |
+| Doctor       | 6        | 14    | Today, Queue, Calendar, Appointment list    |
+| Nursing      | 5        | 11    | Today, Queue, Calendar, Appointment list    |
+| Clinic Admin | 6        | 17    | Today, Queue, Calendar, Appointment list    |
+| Pharmacy     | 4        | 10    | Prescription queue, Clarifications, Counter sale |
+| Analytics    | 2        | 6     | Overview, Cohorts, Explorer                 |
+| Compliance   | 1        | 2     | Activity log, Aggregate reports             |
+
+**Four of the seven panels are one panel with permissions subtracted.** Same
+screens, same order, three links between a receptionist and a doctor. We print
+four names — Front Desk, Doctor, Nursing, Clinic Admin — which promises four
+workspaces, and the UI delivers one. That gap is the vagueness. Pharmacy,
+Analytics and Compliance are genuinely distinct, and nobody called them vague.
+
+Three things compound it:
+
+1. **The landing leads with a greeting.** `today/page.tsx` makes the largest
+   text on first load "Good morning, Priya" plus the date — zero information.
+   The four role homes underneath it are well built and are buried at equal
+   weight below a salutation.
+2. **One accent for everything.** `--color-accent: #0e6e63` across all seven
+   panels. The only cue that a pharmacist is not a doctor is a 10px grey label
+   in the sidebar corner.
+3. **No single primary action.** Every panel opens on a grid of equal-weight
+   cards. Nothing says *start here*, so the eye has nowhere to land.
+
+## Decisions — ANSWERED BY THE USER 2026-10-13
+
+Recorded explicitly, because this file has previously carried a recommendation
+of mine marked as somebody's decision.
+
+- [x] **P1 — Keep the four names and make them real.** Not collapsed to one
+      "Clinic" workspace. Each of the four keeps its name and earns it: its own
+      landing, its own primary action, and navigation ordered by that role's
+      day rather than one shared order.
+- [x] **P2 — Colour differentiates at three touchpoints only.** Sidebar chip,
+      active-nav indicator, page-header rule. Not a full chrome tint: that would
+      mean verifying seven palettes across light and dark, against a product
+      whose neutrality is clinical rather than decorative. The panel is always
+      named in text beside the colour, per the `color-not-only` rule — colour is
+      never the only carrier.
+
+## Blocks, in order
+
+### P-A. A panel registry, and identity at the three touchpoints
+One module describing each panel: name, mark, accent, landing route, primary
+action. Everything else reads from it, so a panel cannot drift from its own
+definition the way the sidebar would have drifted from the permission matrix.
+Touches `lib/nav.ts`, `layout/sidebar.tsx`, `ui/surface.tsx`.
+
+### P-B. The landing states the day, not a greeting
+`PageHeader` on `/today` becomes the state of the work — "Front desk · 6
+waiting · 2 unpaid" — with the name demoted to the top bar where it already
+appears. Each role home gets the counts it actually acts on.
+
+### P-C. One primary action per panel, in a fixed position
+Reception books, the doctor starts the next consultation, nursing records the
+next vitals, pharmacy dispenses next. Emergency stays the red exception already
+in the header, and keeps being the only thing that colour-shouts.
+
+### P-D. Navigation ordered by the day
+The identical first four links are the plainest symptom. Nursing should open on
+vitals, the desk on the queue and billing. Same screens, different order and
+different first item.
+
+### P-E. Density and rhythm pass
+The dashboard screens use one uniform `gap-4`. Move to the skill's density-8
+scale (8–32px) so section, card and field spacing stop being equal, which is
+what makes a dense screen readable rather than merely full.
+
+## What this plan deliberately does not do
+
+- No palette change, no font change, no component library change.
+- No new screens. P1 adds no routes — it differentiates ones that exist.
+- No change to the permission matrix. Presentation is the subject here; who may
+  see what was settled separately and is enforced server-side.
+
+---
+
 # NEXT — the three changes from 2026-10-13
 
 From the manager: merge Register into Book Appointment, run billing across

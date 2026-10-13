@@ -9,6 +9,8 @@ import { ROLE_LABEL } from '@emr/contracts';
 import { ThemeSwitcher } from './theme-switcher';
 import { api } from '@/lib/api-client';
 import { useCan, useSession } from '@/lib/session';
+import { PANEL_FOR_ROLE } from '@/lib/nav';
+import { PANELS } from '@/lib/panels';
 import { initials } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { Sidebar } from './sidebar';
@@ -29,6 +31,7 @@ import { OfflineBanner } from './offline-banner';
 export function AppShell({ children }: { children: React.ReactNode }) {
   const canAdmitEmergency = useCan('emergency:create');
   const session = useSession();
+  const panel = PANELS[PANEL_FOR_ROLE[session.role]];
   const router = useRouter();
   const [drawerOpen, setDrawerOpen] = React.useState(false);
 
@@ -48,7 +51,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="flex min-h-dvh bg-canvas">
+    /*
+      `data-panel` is the one place the panel is declared. Every panel-tinted
+      surface below reads its colour from the tokens this scopes, so a new panel
+      needs a row in `panels.ts` and a rule in `globals.css`, and nothing else.
+    */
+    <div className="flex min-h-dvh bg-canvas" data-panel={panel.id}>
       {/* Persistent rail on a clinic desktop; 1366×768 is the design target. */}
       <aside className="hidden w-56 shrink-0 border-r border-line bg-surface lg:block">
         <div className="sticky top-0 h-dvh">

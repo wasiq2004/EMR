@@ -80,6 +80,26 @@
   --color-accent-ink: #0a4a43;
   --color-accent-contrast: #ffffff;
 
+  /* ---- Panel identity ------------------------------------------------ *
+   * Which of the seven workspaces you are in. Overridden per panel on the
+   * `data-panel` attribute the shell sets, in light and dark alike.
+   *
+   * Used at THREE touchpoints only — the sidebar chip, the active-nav
+   * indicator and the page-header rule — and never as the only signal: the
+   * panel is named in text and carries its own mark, so the identity survives
+   * greyscale, colour blindness and a bad clinic monitor.
+   *
+   * The default is the brand accent, so a panel with no entry still reads as
+   * deliberate rather than unstyled.
+   */
+  --color-panel: #0e6e63;
+  --color-panel-soft: #daeeea;
+  --color-panel-ink: #0a4a43;
+  /* Text ON the solid. White in light mode, where every panel solid is dark;
+     near-black in dark mode, where they are all light pastels. Getting this
+     wrong is the one way a tinted chip becomes unreadable. */
+  --color-panel-contrast: #ffffff;
+
   /* ---- Clinical state ------------------------------------------------ */
   /* Never reused for branding. Always paired with an icon or a word. */
   --color-critical: #b3251b;
@@ -140,9 +160,46 @@
   --duration-ui: 120ms;
 }
 
+[data-panel='front-desk'] {
+  --color-panel: #1f5fa8;
+  --color-panel-soft: #e2ecf8;
+  --color-panel-ink: #17487e;
+}
+[data-panel='doctor'] {
+  --color-panel: #0e6e63;
+  --color-panel-soft: #daeeea;
+  --color-panel-ink: #0a4a43;
+}
+[data-panel='nursing'] {
+  --color-panel: #a33a62;
+  --color-panel-soft: #fae5ec;
+  --color-panel-ink: #7c2b49;
+}
+[data-panel='clinic-admin'] {
+  --color-panel: #8a5a12;
+  --color-panel-soft: #f7ebd9;
+  --color-panel-ink: #66420d;
+}
+[data-panel='pharmacy'] {
+  --color-panel: #2f6b37;
+  --color-panel-soft: #e3f0e4;
+  --color-panel-ink: #22512a;
+}
+[data-panel='analytics'] {
+  --color-panel: #6b4aa8;
+  --color-panel-soft: #ece6f7;
+  --color-panel-ink: #4f3680;
+}
+[data-panel='compliance'] {
+  --color-panel: #555c66;
+  --color-panel-soft: #eceef1;
+  --color-panel-ink: #3e434e;
+}
+
 /* Dark theme. Clinics run late; a night shift should not be a white flash. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
+    --color-panel-contrast: #0d1518;
     --color-canvas: #0d1518;
     --color-surface: #141f23;
     --color-surface-sunk: #101a1d;
@@ -187,7 +244,46 @@
   }
 }
 
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) [data-panel='front-desk'] {
+    --color-panel: #74aae0;
+    --color-panel-soft: #13273a;
+    --color-panel-ink: #9cc6ef;
+  }
+  :root:not([data-theme='light']) [data-panel='doctor'] {
+    --color-panel: #4fb3a4;
+    --color-panel-soft: #10312e;
+    --color-panel-ink: #7fc4b5;
+  }
+  :root:not([data-theme='light']) [data-panel='nursing'] {
+    --color-panel: #e08aa6;
+    --color-panel-soft: #381c26;
+    --color-panel-ink: #eeaabf;
+  }
+  :root:not([data-theme='light']) [data-panel='clinic-admin'] {
+    --color-panel: #dfa953;
+    --color-panel-soft: #33280f;
+    --color-panel-ink: #e8bf7e;
+  }
+  :root:not([data-theme='light']) [data-panel='pharmacy'] {
+    --color-panel: #6cc48d;
+    --color-panel-soft: #102b1b;
+    --color-panel-ink: #93d6ab;
+  }
+  :root:not([data-theme='light']) [data-panel='analytics'] {
+    --color-panel: #a794dd;
+    --color-panel-soft: #231d38;
+    --color-panel-ink: #c0b2e8;
+  }
+  :root:not([data-theme='light']) [data-panel='compliance'] {
+    --color-panel: #a8b0bd;
+    --color-panel-soft: #1e242c;
+    --color-panel-ink: #c2c8d2;
+  }
+}
+
 :root[data-theme='dark'] {
+    --color-panel-contrast: #0d1518;
   --color-canvas: #0d1518;
   --color-surface: #141f23;
   --color-surface-sunk: #101a1d;
@@ -228,6 +324,42 @@
 
   --color-chronic: #a794dd;
   --color-chronic-soft: #231d38;
+}
+
+:root[data-theme='dark'] [data-panel='front-desk'] {
+  --color-panel: #74aae0;
+  --color-panel-soft: #13273a;
+  --color-panel-ink: #9cc6ef;
+}
+:root[data-theme='dark'] [data-panel='doctor'] {
+  --color-panel: #4fb3a4;
+  --color-panel-soft: #10312e;
+  --color-panel-ink: #7fc4b5;
+}
+:root[data-theme='dark'] [data-panel='nursing'] {
+  --color-panel: #e08aa6;
+  --color-panel-soft: #381c26;
+  --color-panel-ink: #eeaabf;
+}
+:root[data-theme='dark'] [data-panel='clinic-admin'] {
+  --color-panel: #dfa953;
+  --color-panel-soft: #33280f;
+  --color-panel-ink: #e8bf7e;
+}
+:root[data-theme='dark'] [data-panel='pharmacy'] {
+  --color-panel: #6cc48d;
+  --color-panel-soft: #102b1b;
+  --color-panel-ink: #93d6ab;
+}
+:root[data-theme='dark'] [data-panel='analytics'] {
+  --color-panel: #a794dd;
+  --color-panel-soft: #231d38;
+  --color-panel-ink: #c0b2e8;
+}
+:root[data-theme='dark'] [data-panel='compliance'] {
+  --color-panel: #a8b0bd;
+  --color-panel-soft: #1e242c;
+  --color-panel-ink: #c2c8d2;
 }
 
 /* ---- Base ------------------------------------------------------------ */
