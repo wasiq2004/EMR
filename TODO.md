@@ -244,6 +244,20 @@ counter settle one balance".
       against an encounter that actually has a note in it, because the
       guarantee is about a body, not a status.
 
+      **And it broke the deploy, which is worth recording.** The test file was
+      written AFTER the last typecheck and never type-checked again: `vitest`
+      does not check types, `eslint` did not cover it, and 12 green tests looked
+      like proof. `nest build` compiles `src/**/*.ts` with no
+      `tsconfig.build.json` excluding tests, so the Docker build type-checked it
+      for the first time and failed with 6 errors — `noUncheckedIndexedAccess`
+      makes `recentEncounters[0]` possibly undefined, and a `Partial<Record<...>>`
+      constraint rejects a projection carrying none of those fields under the
+      weak-type check.
+
+      The rule: verify with `pnpm --filter @emr/api build`, which is what the
+      Dockerfile runs. An ad-hoc `tsc --noEmit` proves nothing about a file
+      written after it ran.
+
 ---
 
 # Build to completion — task list

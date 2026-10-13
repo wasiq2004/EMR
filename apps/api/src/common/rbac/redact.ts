@@ -69,20 +69,22 @@ export function mayReadClinicalContent(role: UserRole): boolean {
  * doctor's own consultation screen goes through this function on every load and
  * must not pay for it.
  */
-export function redactEncounter<T extends Partial<Record<ClinicalNarrativeField, unknown>>>(
-  row: T,
-  role: UserRole,
-): T {
+export function redactEncounter<T extends object>(row: T, role: UserRole): T {
   if (mayReadClinicalContent(role)) return row;
 
-  const redacted = { ...row };
+  const redacted = { ...row } as Record<string, unknown>;
   for (const field of CLINICAL_NARRATIVE_FIELDS) {
     // Only blank what the row actually carries. Inventing `planNotes: null` on
     // a projection that never selected it would turn "not asked for" into
     // "empty", and a caller cannot tell those apart.
-    if (field in redacted) redacted[field] = null as T[ClinicalNarrativeField];
+    //
+    // `T extends object` rather than a Partial of the narrative fields: a
+    // projection that selects none of them is a legitimate argument, and the
+    // narrower constraint rejected it outright under TypeScript's weak-type
+    // check — an object with no properties in common.
+    if (field in redacted) redacted[field] = null;
   }
-  return redacted;
+  return redacted as T;
 }
 
 /** The shape `snapshot()` returns, as far as redaction is concerned. */

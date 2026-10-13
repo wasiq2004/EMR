@@ -105,6 +105,17 @@ describe('redactEncounter', () => {
   });
 });
 
+/**
+ * `recentEncounters[0]` under `noUncheckedIndexedAccess` is `T | undefined`, and
+ * optional-chaining past it would make these assertions pass on a fixture that
+ * had lost its encounter. So the element is asserted to exist first.
+ */
+function firstVisit(snapshot: typeof FULL_SNAPSHOT) {
+  const [visit] = snapshot.recentEncounters;
+  expect(visit, 'the fixture must carry a recent encounter').toBeDefined();
+  return visit!;
+}
+
 describe('redactSnapshot', () => {
   it('gives each section only to a role holding that section’s permission', () => {
     const sections = [
@@ -128,8 +139,8 @@ describe('redactSnapshot', () => {
     // The reason PHARMACIST holds allergy:read at all: penicillin.
     expect(out.allergies).toHaveLength(1);
     expect(out.conditions).toHaveLength(0);
-    expect(out.recentEncounters[0].diagnoses).toEqual([]);
-    expect(out.recentEncounters[0].chiefComplaint).toBeNull();
+    expect(firstVisit(out).diagnoses).toEqual([]);
+    expect(firstVisit(out).chiefComplaint).toBeNull();
     // It does dispense, so the medication list stays.
     expect(out.activeMedications).toHaveLength(1);
   });
@@ -140,7 +151,7 @@ describe('redactSnapshot', () => {
     expect(out.conditions).toHaveLength(0);
     expect(out.activeMedications).toHaveLength(0);
     expect(out.latestVitals).toHaveLength(0);
-    expect(out.recentEncounters[0].chiefComplaint).toBeNull();
+    expect(firstVisit(out).chiefComplaint).toBeNull();
   });
 
   it('leaves the doctor’s snapshot whole', () => {
@@ -149,8 +160,8 @@ describe('redactSnapshot', () => {
     expect(out.conditions).toHaveLength(1);
     expect(out.activeMedications).toHaveLength(1);
     expect(out.latestVitals).toHaveLength(1);
-    expect(out.recentEncounters[0].diagnoses).toEqual(['Suspected angina']);
-    expect(out.recentEncounters[0].chiefComplaint).toBe('Chest pain');
+    expect(firstVisit(out).diagnoses).toEqual(['Suspected angina']);
+    expect(firstVisit(out).chiefComplaint).toBe('Chest pain');
   });
 
   it('keeps the balance, which is nobody’s clinical data', () => {
