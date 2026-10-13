@@ -11,6 +11,7 @@ import { formatPaise, formatPaiseShort } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { Panel, PanelBody, PanelHeader, PageHeader, Stat } from '@/components/ui/surface';
 import { SkeletonRows } from '@/components/ui/feedback';
+import { StatRow } from '@/components/ui/data-state';
 
 /**
  * Reports.
@@ -49,38 +50,22 @@ export default function ReportsPage() {
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Panel>
-          <PanelBody>
-            <Stat label="Visits" value={isLoading ? '—' : (data?.visits ?? 0)} />
-          </PanelBody>
-        </Panel>
-        <Panel>
-          <PanelBody>
-            <Stat
-              label="New patients"
-              value={isLoading ? '—' : (data?.newPatients ?? 0)}
-            />
-          </PanelBody>
-        </Panel>
-        <Panel>
-          <PanelBody>
-            <Stat
-              label="Collected"
-              value={isLoading ? '—' : formatPaiseShort(data?.collectionsPaise ?? 0)}
-            />
-          </PanelBody>
-        </Panel>
-        <Panel>
-          <PanelBody>
-            <Stat
-              label="No-shows"
-              value={isLoading ? '—' : (data?.noShows ?? 0)}
-              tone={(data?.noShows ?? 0) > 5 ? 'warning' : 'neutral'}
-            />
-          </PanelBody>
-        </Panel>
-      </div>
+      <StatRow>
+        <Stat label="Visits" value={isLoading ? '—' : (data?.visits ?? 0)} />
+        <Stat
+          label="New patients"
+          value={isLoading ? '—' : (data?.newPatients ?? 0)}
+        />
+        <Stat
+          label="Collected"
+          value={isLoading ? '—' : formatPaiseShort(data?.collectionsPaise ?? 0)}
+        />
+        <Stat
+          label="No-shows"
+          value={isLoading ? '—' : (data?.noShows ?? 0)}
+          tone={(data?.noShows ?? 0) > 5 ? 'warning' : 'neutral'}
+        />
+      </StatRow>
 
       <Panel>
         <PanelHeader title="Visits per day" description="Hover a bar for the figure" />

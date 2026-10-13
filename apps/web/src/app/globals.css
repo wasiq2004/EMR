@@ -156,6 +156,21 @@
    * 120ms is below the threshold where a hover feels like it lags and above the
    * one where it reads as a jump.
    */
+  /* ---- Vertical rhythm ----------------------------------------------- *
+   * A dense clinical screen, so the scale is tight — but it is a SCALE. Every
+   * block on a page used one 16px gap, which means a page title, a row of
+   * figures and the main table were all equally far apart, and equal distance
+   * reads as equal importance. That is most of why a full screen looked flat.
+   *
+   *   24px  after the page title, which is a different kind of thing
+   *   16px  between sections of content
+   *   12px  between cells inside one band of figures
+   *    8px  between a label and its value
+   *
+   * Expressed as Tailwind utilities at the usage sites rather than as custom
+   * properties, because the spacing utilities already exist and a parallel set
+   * of tokens would just be a second vocabulary for the same four numbers.
+   */
   --ease-ui: cubic-bezier(0.32, 0.72, 0, 1);
   --duration-ui: 120ms;
 }

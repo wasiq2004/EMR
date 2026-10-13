@@ -183,7 +183,7 @@ export function StatRow({
 
   return (
     <Panel className={className}>
-      <PanelBody className={cn('grid gap-4', cols)}>{children}</PanelBody>
+      <PanelBody className={cn('grid gap-3', cols)}>{children}</PanelBody>
     </Panel>
   );
 }

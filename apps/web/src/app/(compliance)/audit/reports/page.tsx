@@ -4,8 +4,9 @@ import { useQuery } from '@tanstack/react-query';
 import type { ReportSummary } from '@emr/contracts';
 import { api } from '@/lib/api-client';
 import { qk } from '@/lib/query-client';
-import { Panel, PanelBody, PanelHeader, PageHeader, Stat } from '@/components/ui/surface';
+import { Panel, PanelHeader, PageHeader, Stat } from '@/components/ui/surface';
 import { Alert, SkeletonRows } from '@/components/ui/feedback';
+import { StatRow } from '@/components/ui/data-state';
 
 /**
  * Aggregate reports for compliance review.
@@ -39,34 +40,18 @@ export default function ComplianceReportsPage() {
         <SkeletonRows rows={4} />
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatRow>
+            <Stat label="Consultations" value={data?.visits ?? 0} hint="Last 14 days" />
+            <Stat label="New registrations" value={data?.newPatients ?? 0} />
+            <Stat label="Appointments" value={data?.appointmentsBooked ?? 0} />
+            <Stat label="Did not attend" value={data?.noShows ?? 0} />
+            </StatRow>
+            
             <Panel>
-              <PanelBody>
-                <Stat label="Consultations" value={data?.visits ?? 0} hint="Last 14 days" />
-              </PanelBody>
-            </Panel>
-            <Panel>
-              <PanelBody>
-                <Stat label="New registrations" value={data?.newPatients ?? 0} />
-              </PanelBody>
-            </Panel>
-            <Panel>
-              <PanelBody>
-                <Stat label="Appointments" value={data?.appointmentsBooked ?? 0} />
-              </PanelBody>
-            </Panel>
-            <Panel>
-              <PanelBody>
-                <Stat label="Did not attend" value={data?.noShows ?? 0} />
-              </PanelBody>
-            </Panel>
-          </div>
-
-          <Panel>
             <PanelHeader
-              title="Activity by clinician"
-              description="Volume only — no clinical content."
-            />
+            title="Activity by clinician"
+            description="Volume only — no clinical content."
+          />
             <ul className="divide-y divide-line-soft">
               {(data?.byPractitioner ?? []).map((row) => (
                 <li

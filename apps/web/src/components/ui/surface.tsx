@@ -78,7 +78,12 @@ export function PageHeader({
   className?: string;
 }) {
   return (
-    <header className={cn('flex flex-col gap-3', className)}>
+    /*
+      `pb-2` on top of the page's own 16px gap puts 24px under the title and
+      leaves 16px between everything after it. The title stops being the first
+      item in a list of equals and starts being a heading.
+    */
+    <header className={cn('flex flex-col gap-3 pb-2', className)}>
       {breadcrumb}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">

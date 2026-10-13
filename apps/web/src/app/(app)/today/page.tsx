@@ -28,6 +28,7 @@ import { Panel, PanelBody, PanelHeader, Stat } from '@/components/ui/surface';
 import { PanelPageHeader, summarise } from '@/components/layout/panel-header';
 import { ResultsToReviewCard } from '@/features/lab/results-to-review-card';
 import { EmptyState, SkeletonRows } from '@/components/ui/feedback';
+import { StatRow } from '@/components/ui/data-state';
 
 /**
  * Today.
@@ -97,43 +98,27 @@ function FrontDeskHome() {
         )}
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Panel>
-          <PanelBody>
-            <Stat
-              label="Waiting now"
-              value={waiting.filter((e) => e.appointment.status === 'ARRIVED').length}
-            />
-          </PanelBody>
-        </Panel>
-        <Panel>
-          <PanelBody>
-            <Stat
-              label="Longest wait"
-              value={formatMinutes(longestWait || null)}
-              tone={longestWait > 45 ? 'warning' : 'neutral'}
-              hint={longestWait > 45 ? 'Consider telling the patient' : undefined}
-            />
-          </PanelBody>
-        </Panel>
-        <Panel>
-          <PanelBody>
-            <Stat
-              label="Seen today"
-              value={queue.data?.completed.length ?? 0}
-            />
-          </PanelBody>
-        </Panel>
-        <Panel>
-          <PanelBody>
-            <Stat
-              label="Open tasks"
-              value={tasks.data?.items.length ?? 0}
-              tone={(tasks.data?.items.length ?? 0) > 0 ? 'warning' : 'neutral'}
-            />
-          </PanelBody>
-        </Panel>
-      </div>
+      <StatRow>
+        <Stat
+          label="Waiting now"
+          value={waiting.filter((e) => e.appointment.status === 'ARRIVED').length}
+        />
+        <Stat
+          label="Longest wait"
+          value={formatMinutes(longestWait || null)}
+          tone={longestWait > 45 ? 'warning' : 'neutral'}
+          hint={longestWait > 45 ? 'Consider telling the patient' : undefined}
+        />
+        <Stat
+          label="Seen today"
+          value={queue.data?.completed.length ?? 0}
+        />
+        <Stat
+          label="Open tasks"
+          value={tasks.data?.items.length ?? 0}
+          tone={(tasks.data?.items.length ?? 0) > 0 ? 'warning' : 'neutral'}
+        />
+      </StatRow>
 
       <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
         <Panel>
@@ -470,39 +455,23 @@ function ClinicAdminHome() {
         )}
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Panel>
-          <PanelBody>
-            <Stat label="Visits, 14 days" value={isLoading ? '—' : data?.visits ?? 0} />
-          </PanelBody>
-        </Panel>
-        <Panel>
-          <PanelBody>
-            <Stat
-              label="Collected"
-              value={isLoading ? '—' : formatPaiseShort(data?.collectionsPaise ?? 0)}
-            />
-          </PanelBody>
-        </Panel>
-        <Panel>
-          <PanelBody>
-            <Stat
-              label="Outstanding"
-              value={isLoading ? '—' : formatPaiseShort(data?.outstandingPaise ?? 0)}
-              tone={(data?.outstandingPaise ?? 0) > 0 ? 'warning' : 'neutral'}
-            />
-          </PanelBody>
-        </Panel>
-        <Panel>
-          <PanelBody>
-            <Stat
-              label="No-shows"
-              value={isLoading ? '—' : data?.noShows ?? 0}
-              hint="Last 14 days"
-            />
-          </PanelBody>
-        </Panel>
-      </div>
+      <StatRow>
+        <Stat label="Visits, 14 days" value={isLoading ? '—' : data?.visits ?? 0} />
+        <Stat
+          label="Collected"
+          value={isLoading ? '—' : formatPaiseShort(data?.collectionsPaise ?? 0)}
+        />
+        <Stat
+          label="Outstanding"
+          value={isLoading ? '—' : formatPaiseShort(data?.outstandingPaise ?? 0)}
+          tone={(data?.outstandingPaise ?? 0) > 0 ? 'warning' : 'neutral'}
+        />
+        <Stat
+          label="No-shows"
+          value={isLoading ? '—' : data?.noShows ?? 0}
+          hint="Last 14 days"
+        />
+      </StatRow>
 
       <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
         <Panel>
