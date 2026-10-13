@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   AddToQueue,
   AppointmentStatus,
+  EmergencyIntake,
   BookAppointment,
   RescheduleAppointment,
   SaveSchedule,
@@ -75,6 +76,26 @@ export class SchedulingController {
   @Post('queue')
   addWalkIn(@Body() body: unknown) {
     return this.scheduling.addWalkIn(parseBody(AddToQueue, body));
+  }
+
+  /**
+   * Somebody carried in: registered and queued at the front, in one call.
+   *
+   * `emergency:create`, not `patient:create`. The privilege being granted here
+   * is not "may create a patient" — it is "may create one WITHOUT the duplicate
+   * search every other path enforces". That bypass is the thing worth naming,
+   * granting and auditing, so it is its own permission.
+   *
+   * Held by reception, nursing, the doctor and the clinic admin: whoever is
+   * physically at the front of the clinic when somebody is carried in. A
+   * permission narrow enough that its only holder is mid-consultation is a
+   * permission that gets worked around.
+   */
+  @RequirePermission('emergency:create')
+  @Audit('EMERGENCY_ADMITTED', 'appointment')
+  @Post('emergency')
+  admitEmergency(@Body() body: unknown) {
+    return this.scheduling.admitEmergency(parseBody(EmergencyIntake, body));
   }
 
   @RequirePermission('appointment:update')

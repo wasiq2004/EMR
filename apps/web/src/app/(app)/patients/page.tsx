@@ -44,7 +44,7 @@ export default function PatientsPage() {
   const patients = data?.items ?? [];
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <PageHeader
         title="Patients"
         description="Search by mobile number or name before registering anyone new."

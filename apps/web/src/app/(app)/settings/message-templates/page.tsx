@@ -74,7 +74,7 @@ export default function MessageTemplatesPage() {
   const waiting = items.filter((t) => t.status === 'PENDING' || t.status === 'DRAFT');
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       {blocked.length > 0 ? (
         <Alert tone="critical" title={`${blocked.length} template${blocked.length === 1 ? '' : 's'} cannot be sent`}>
           WhatsApp has rejected or paused {blocked.length === 1 ? 'it' : 'them'}.

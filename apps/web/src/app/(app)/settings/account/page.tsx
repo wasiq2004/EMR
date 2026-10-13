@@ -77,7 +77,7 @@ export default function AccountSettingsPage() {
   });
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
       <Panel>
         <PanelHeader title="Your account" />
         <PanelBody>

@@ -75,7 +75,7 @@ export default function SchedulesSettingsPage() {
   }, [schedules.data]);
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <Alert tone="info" title="This is what the calendar draws">
         Bookable slots are worked out from these sessions, minus anything below,
         minus what is already booked. Nothing is stored per slot — change a session

@@ -52,7 +52,7 @@ export default function AppointmentsPage() {
   );
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <PageHeader
         title="Appointments"
         description="Today's booked appointments. Walk-ins are on the queue."

@@ -66,7 +66,7 @@ export default function ClinicAnalyticsPage() {
   const set = (patch: Partial<AnalyticsQuery>) => setFilters((f) => ({ ...f, ...patch }));
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex w-full flex-col gap-3">
       <Link
         href="/reports"
         className="inline-flex w-fit items-center gap-1.5 text-xs text-ink-faint hover:text-ink"

@@ -94,7 +94,7 @@ export default function CohortsPage() {
   const running = preview.isPending || evaluate.isPending;
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <PageHeader
         title="Cohorts"
         description={

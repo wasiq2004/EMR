@@ -47,7 +47,7 @@ export default function ProductsPage() {
   const products = useProducts({ search: search || undefined, includeInactive: true });
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <PageHeader
         title="Products"
         description="What the counter sells, mapped to what doctors prescribe."

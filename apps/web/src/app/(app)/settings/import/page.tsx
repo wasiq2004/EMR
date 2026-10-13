@@ -157,7 +157,7 @@ function ImportWizard({ canExecute }: { canExecute: boolean }) {
   };
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
       <ol className="flex flex-wrap items-center gap-1 text-xs">
         {STAGES.map((item, index) => (
           <li key={item.key} className="flex items-center gap-1">

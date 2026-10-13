@@ -44,7 +44,7 @@ export default function ExplorerPage() {
     });
 
   return (
-    <div className="space-y-5">
+    <div className="flex w-full flex-col gap-3">
       <PageHeader
         title="Explorer"
         description="How a group changed over time. Month by month, never day by day."

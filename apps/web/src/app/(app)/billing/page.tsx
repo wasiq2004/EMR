@@ -35,7 +35,7 @@ export default function BillingPage() {
   const collected = invoices.reduce((s, i) => s + i.paidPaise, 0);
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <PageHeader
         title="Billing"
         description="Invoices and payments. Not an accounting system."

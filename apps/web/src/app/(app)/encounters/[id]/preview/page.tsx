@@ -108,7 +108,7 @@ export default function PrescriptionPreviewPage() {
   const finalised = encounter.data.isFinalized;
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <div className="flex flex-wrap items-center gap-3 print:hidden">
         <Link
           href={`/encounters/${encounterId}`}

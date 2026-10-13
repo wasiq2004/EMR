@@ -171,6 +171,13 @@ const CLINIC_ROUTES = [
   '/inbox',
   '/inbox/unlinked',
   '/tasks',
+  /*
+   * Reached from a red button in the header on every screen, so it is walked by
+   * every clinic role that holds `emergency:create` — which is reception,
+   * nursing, the doctor and the admin. A screen opened under pressure is the
+   * worst one to discover a render error on.
+   */
+  '/emergency',
 ];
 
 /*

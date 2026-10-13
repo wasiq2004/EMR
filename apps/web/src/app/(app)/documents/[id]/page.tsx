@@ -32,7 +32,7 @@ export default function DocumentPage() {
   const blocked = data.virusScanStatus !== null && data.virusScanStatus !== 'CLEAN';
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <Link
         href="/documents"
         className="inline-flex w-fit items-center gap-1.5 text-xs text-ink-faint hover:text-ink"

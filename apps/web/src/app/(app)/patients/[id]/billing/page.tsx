@@ -39,7 +39,7 @@ export default function PatientBillingPage() {
   const outstanding = Math.max(billed - paid, 0);
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <StatRow columns={3}>
         <Stat label="Billed" value={formatPaise(billed)} hint={`${live.length} invoices`} />
         <Stat label="Paid" value={formatPaise(paid)} tone="positive" />

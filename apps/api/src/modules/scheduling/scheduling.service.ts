@@ -63,7 +63,20 @@ export class SchedulingService {
             gte(schema.appointment.scheduledStart, startOfDay),
           ),
         )
-        .orderBy(asc(schema.appointment.queuePosition), asc(schema.appointment.arrivedAt));
+        /*
+         * Emergencies first, then manual position, then arrival.
+         *
+         * The FLAG leads the sort rather than the position alone. Positions are
+         * hand-editable — that is the point of them — so a desk reordering the
+         * queue could otherwise drag somebody who was carried in below a routine
+         * follow-up without meaning to. Sorting on the fact rather than on a
+         * number nobody is watching makes that impossible.
+         */
+        .orderBy(
+          desc(schema.appointment.isEmergency),
+          asc(schema.appointment.queuePosition),
+          asc(schema.appointment.arrivedAt),
+        );
 
       // Open encounters, so the board can offer "resume" rather than "start".
       const openEncounters = await tx
@@ -125,6 +138,166 @@ export class SchedulingService {
   }
 
   /** A walk-in goes straight onto the board. One action, not two. */
+  /**
+   * Somebody carried in: registered and queued at the front, in one call.
+   *
+   * ONE CALL AND ONE TRANSACTION, and that is the whole design. Registering and
+   * then booking is two requests, and the gap between them is where a patient
+   * ends up existing with no visit while the person holding the tablet is
+   * already walking away. At a desk that is an annoyance; with somebody on a
+   * trolley it is the record of their arrival going missing.
+   *
+   * IT BYPASSES THE DUPLICATE CHECK, deliberately, and records that it did.
+   * `register()` refuses without a token proving a search ran first, because
+   * duplicate registration is the likeliest failure at a busy desk. That rule is
+   * correct there and wrong here: the question is whether this person is seen in
+   * the next two minutes. A form that cannot be completed under those conditions
+   * does not get completed — it gets worked around, by inventing a date of birth,
+   * which is worse than recording that nobody knew it.
+   *
+   * So the bypass is explicit, stored on the row, and audited. A duplicate
+   * created this way is a known cost, resolved afterwards by merging — which
+   * exists, and is the right direction for the error to run in.
+   */
+  async admitEmergency(input: {
+    label: string;
+    mobileE164?: string | null;
+    gender?: string | null;
+    ageYears?: number | null;
+    attendantName?: string | null;
+    attendantPhoneE164?: string | null;
+    practitionerId?: string | null;
+    reasonText?: string | null;
+    bypassReason?: string | null;
+    idempotencyKey?: string | null;
+  }): Promise<Appointment> {
+    const ctx = TenantContext.require();
+    const now = new Date();
+
+    return this.tenantDb.run(async (tx) => {
+      // A retried tap returns the admission it already made. See `addWalkIn`.
+      const existing = await findByKey(tx, input.idempotencyKey);
+      if (existing) return existing;
+
+      const mrnRow = await tx.execute(sql`
+        SELECT coalesce(max(nullif(regexp_replace(mrn, '[^0-9]', '', 'g'), '')::bigint), 0) + 1 AS next
+        FROM patient
+      ` as never);
+      const next = Number((mrnRow as unknown as { rows: { next: string | number }[] }).rows[0]?.next ?? 1);
+
+      const [patient] = await tx
+        .insert(schema.patient)
+        .values({
+          clinicId: ctx.clinicId,
+          mrn: `MRN-${String(next).padStart(6, '0')}`,
+          fullName: input.label,
+          // NOT NULL, written by a trigger afterwards.
+          nameNormalized: input.label.toLowerCase(),
+          mobileE164: input.mobileE164 ?? null,
+          /*
+           * UNKNOWN is a real answer, not a placeholder. The enum carries it for
+           * exactly this case, and it is honest in a way that guessing is not.
+           */
+          gender: (input.gender as 'UNKNOWN') ?? 'UNKNOWN',
+          ageYears: input.ageYears ?? null,
+          /*
+           * A stated age is only meaningful with the date it was stated —
+           * otherwise it silently rots and corrupts paediatric dosing later.
+           */
+          ageRecordedAt: input.ageYears != null ? now.toISOString().slice(0, 10) : null,
+          /*
+           * Tagged permanently. These details were taken in an emergency and
+           * verified by nobody; the spelling and the age are what somebody
+           * shouted across a room. Staff need to know that when the number does
+           * not ring, and the completion task below is driven off it.
+           */
+          tags: ['emergency', 'incomplete-registration'],
+          createdBy: ctx.userId,
+          updatedBy: ctx.userId,
+        })
+        .returning();
+
+      /*
+       * In front of everything waiting.
+       *
+       * Positions are sparse (10, 20, 30…) so the desk can reorder without
+       * renumbering. Taking `min - 10` puts this at the head without touching
+       * another row — a queue that renumbers itself under a clinician reading it
+       * is how somebody gets called twice.
+       */
+      const lowest = await tx.execute(sql`
+        SELECT coalesce(min(queue_position), 10) AS lowest FROM appointment
+        WHERE status IN ('ARRIVED','IN_PROGRESS')
+      ` as never);
+      const front =
+        Number((lowest as unknown as { rows: { lowest: string | number }[] }).rows[0]?.lowest ?? 10) - 10;
+
+      const [created] = await tx
+        .insert(schema.appointment)
+        .values({
+          clinicId: ctx.clinicId,
+          patientId: patient!.id,
+          practitionerId: input.practitionerId ?? null,
+          status: 'ARRIVED',
+          scheduledStart: now,
+          arrivedAt: now,
+          queuePosition: front,
+          isWalkIn: true,
+          isEmergency: true,
+          attendantName: input.attendantName ?? null,
+          attendantPhoneE164: input.attendantPhoneE164 ?? null,
+          registrationBypassReason:
+            input.bypassReason?.trim() || 'Emergency admission — duplicate search skipped',
+          reasonText: input.reasonText ?? null,
+          idempotencyKey: input.idempotencyKey ?? null,
+          createdBy: ctx.userId,
+          updatedBy: ctx.userId,
+        })
+        .returning();
+
+      /*
+       * The task that finishes the job.
+       *
+       * Without it, emergency records quietly become the worst data in the
+       * system: no date of birth, a guessed name, and nobody whose job it is to
+       * correct them. The task is created inside the same transaction so it
+       * cannot be the thing that failed.
+       */
+      await tx.insert(schema.task).values({
+        clinicId: ctx.clinicId,
+        patientId: patient!.id,
+        taskType: 'COMPLETE_EMERGENCY_REGISTRATION',
+        title: `Complete registration for ${input.label}`,
+        description:
+          'Admitted as an emergency, so the duplicate check was skipped and the record is ' +
+          'minimal. Check whether this person already exists — merge if so — and fill in the ' +
+          'date of birth, gender and contact details.',
+        /*
+         * URGENT, not STAT. STAT in this product means a clinical emergency, and
+         * this is paperwork about one — putting it at the top of the same list a
+         * clinician scans is how STAT stops meaning anything.
+         */
+        priority: 'URGENT',
+        status: 'REQUESTED',
+        createdBy: ctx.userId,
+        updatedBy: ctx.userId,
+      });
+
+      /*
+       * The queue screens repaint immediately rather than on their next poll.
+       * For an ordinary walk-in a minute's delay is untidy; for this one it is
+       * the clinician not knowing somebody is waiting.
+       */
+      this.events.emit({
+        type: 'queue-changed',
+        clinicId: ctx.clinicId,
+        data: { appointmentId: created!.id, status: 'ARRIVED', emergency: true },
+      });
+
+      return serialiseAppointment(created!);
+    });
+  }
+
   async addWalkIn(input: {
     patientId: string;
     practitionerId?: string | null;

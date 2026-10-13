@@ -44,7 +44,7 @@ export default function StaffSettingsPage() {
   );
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       {cannotSign.length > 0 ? (
         <Alert
           tone="warning"

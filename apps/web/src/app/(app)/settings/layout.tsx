@@ -14,7 +14,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   const links = settingsLinksFor(session.role);
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-5">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <PageHeader title="Settings" description={session.clinicName} />
 
       <div className="grid gap-5 lg:grid-cols-[14rem_1fr]">

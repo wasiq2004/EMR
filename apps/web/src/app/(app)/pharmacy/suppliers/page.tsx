@@ -36,7 +36,7 @@ export default function SuppliersPage() {
   const suppliers = useSuppliers(true);
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <PageHeader
         title="Suppliers"
         description="Who the pharmacy buys from."

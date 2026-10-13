@@ -36,7 +36,7 @@ export default function PharmacyReportsPage() {
   const dispensedAnything = (data?.prescriptionsDispensed ?? 0) > 0;
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <PageHeader
         title="Pharmacy reports"
         description={

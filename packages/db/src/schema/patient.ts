@@ -393,6 +393,49 @@ export const appointment = pgTable(
     /** True for unbooked walk-ins; drives queue display and no-show analytics. */
     isWalkIn: boolean('is_walk_in').notNull().default(false),
 
+    /**
+     * Somebody who was carried in.
+     *
+     * A FLAG ON THE ORDINARY VISIT, not a different kind of record. An
+     * emergency is the same object — same consultation, same prescription,
+     * same bill — entering the queue at the front. Making it a separate type
+     * would fork every screen that lists a visit, and then the emergency
+     * version of each would drift from the one people actually maintain.
+     *
+     * It stays set after the fact. "Was this an emergency?" is a question
+     * asked of last month's figures, and a flag that clears when the patient
+     * is seen cannot answer it.
+     */
+    isEmergency: boolean('is_emergency').notNull().default(false),
+
+    /**
+     * Who brought them in, and on what number.
+     *
+     * ON THE VISIT, not on the patient, and that distinction is the whole
+     * reason these columns exist. `patient.emergency_contact_*` is the standing
+     * next-of-kin — a fact about the person that holds across years. This is
+     * the neighbour who drove them here this afternoon, and it is different the
+     * next time. Storing it on the patient would overwrite a real next-of-kin
+     * with whoever happened to be passing.
+     *
+     * Nullable: an unaccompanied patient is common and must not be harder to
+     * register than an accompanied one.
+     */
+    attendantName: text('attendant_name'),
+    attendantPhoneE164: text('attendant_phone_e164'),
+
+    /**
+     * Why the duplicate search was skipped, when it was.
+     *
+     * Registering normally REFUSES without proof that a search for an existing
+     * patient ran first, because duplicate registration is the likeliest
+     * failure at a busy desk. That rule is wrong when somebody is being carried
+     * in, so the emergency path bypasses it — and records that it did, with
+     * who and when, through the ordinary audit trail. A bypass that leaves no
+     * trace is indistinguishable from the check never having existed.
+     */
+    registrationBypassReason: text('registration_bypass_reason'),
+
     reasonText: text('reason_text'),
     notes: text('notes'),
 
@@ -425,6 +468,19 @@ export const appointment = pgTable(
     foreignKey({ columns: [t.locationId], foreignColumns: [clinicLocation.id] }).onDelete('set null'),
 
     index('appointment_clinic_start_idx').on(t.clinicId, t.scheduledStart),
+    /*
+     * The live queue, in the order it is displayed.
+     *
+     * Emergencies first, then manual position. The queue is polled constantly
+     * by every open screen in the clinic, so this is one of the few indexes
+     * here that exists for a specific query rather than for a foreign key.
+     */
+    index('appointment_queue_order_idx').on(
+      t.clinicId,
+      t.isEmergency.desc(),
+      t.queuePosition,
+      t.arrivedAt,
+    ),
     index('appointment_clinic_patient_idx').on(t.clinicId, t.patientId, t.scheduledStart.desc()),
     index('appointment_clinic_practitioner_idx').on(
       t.clinicId,

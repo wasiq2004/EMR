@@ -60,7 +60,7 @@ export default function PharmacyAlertsPage() {
     data.lowStock.length === 0;
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <PageHeader
         title="Stock alerts"
         description="Everything that needs a decision, worst consequence first."

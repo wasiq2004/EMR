@@ -60,7 +60,7 @@ export default function PurchasesPage() {
   const canApprove = session.role === 'OWNER_ADMIN';
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <PageHeader
         title="Purchasing"
         description="Orders to suppliers, and the deliveries that come back."

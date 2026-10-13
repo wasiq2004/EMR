@@ -4,11 +4,11 @@ import * as React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { LogOut, Menu, Settings, X } from 'lucide-react';
+import { LogOut, Menu, Settings, Siren, X } from 'lucide-react';
 import { ROLE_LABEL } from '@emr/contracts';
 import { ThemeSwitcher } from './theme-switcher';
 import { api } from '@/lib/api-client';
-import { useSession } from '@/lib/session';
+import { useCan, useSession } from '@/lib/session';
 import { initials } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { Sidebar } from './sidebar';
@@ -27,6 +27,7 @@ import { OfflineBanner } from './offline-banner';
  * The Compliance panel is the one exception and lives in its own route group.
  */
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const canAdmitEmergency = useCan('emergency:create');
   const session = useSession();
   const router = useRouter();
   const [drawerOpen, setDrawerOpen] = React.useState(false);
@@ -97,6 +98,39 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Omnibox />
 
           <div className="ml-auto flex items-center gap-1">
+            {/*
+              EMERGENCY, IN THE HEADER, ON EVERY SCREEN.
+
+              Not in the sidebar, where it would sit as the ninth item in a list
+              somebody has to read. The whole value of this control is that it is
+              in the same place whatever is on screen when a patient is carried
+              in — the person reaching for it is not navigating, they are hitting
+              the one thing that is always there.
+
+              Red and labelled, not an icon alone: an icon-only control is
+              something you learn, and this one has to work for a receptionist on
+              their second day. The label collapses below `sm` where the header
+              genuinely has no room, and the siren plus the critical colour still
+              carry it.
+
+              Shown only to the roles that hold the permission, so it is never a
+              button that explains itself with a refusal.
+            */}
+            {canAdmitEmergency ? (
+              <Button
+                variant="critical"
+                size="sm"
+                className="mr-1.5 shadow-raise"
+                asChild
+              >
+                <Link href="/emergency">
+                  <Siren aria-hidden />
+                  <span className="hidden sm:inline">Emergency</span>
+                  <span className="sr-only sm:hidden">Emergency admission</span>
+                </Link>
+              </Button>
+            ) : null}
+
             {/*
               Hidden below sm. On a phone the header has room for the search box
               and roughly one more thing, and that thing is not a colour

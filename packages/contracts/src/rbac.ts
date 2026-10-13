@@ -63,6 +63,21 @@ export const RESOURCES = [
    */
   'labOrder',
 
+  /**
+   * Raising an emergency visit.
+   *
+   * ITS OWN RESOURCE rather than a looser `patient:create`, because the action
+   * is not "create a patient" — it is "create a patient WITHOUT the duplicate
+   * check that every other path enforces". That bypass is the privilege, so it
+   * is the thing that gets named, granted and audited.
+   *
+   * It is deliberately wide: the people who are physically present when
+   * somebody is carried in are whoever happens to be at the front of the
+   * clinic. A permission so narrow that the only person holding it is in a
+   * consultation is a permission that gets worked around.
+   */
+  'emergency',
+
   'auditEvent',
   'import',
   'export',
@@ -171,6 +186,7 @@ const OWNER_ADMIN: Permission[] = [
   ...p('patient', 'read', 'create', 'update', 'merge'),
   ...p('appointment', 'read', 'create', 'update', 'delete'),
   ...p('labOrder', 'read', 'create', 'update', 'delete'),
+  ...p('emergency', 'create'),
   ...p('encounter', 'read'),
   // Full clinical READ. Every such access is additionally tagged
   // OWNER_CLINICAL_ACCESS in the audit trail, so a practice can demonstrate to
@@ -246,6 +262,7 @@ const DOCTOR: Permission[] = [
    * separate permissions.
    */
   ...p('labOrder', 'read', 'create', 'update'),
+  ...p('emergency', 'create'),
   ...p('allergy', 'read', 'create', 'update'),
   ...p('prescription', 'read', 'create', 'update', 'sign'),
   ...p('document', 'read', 'create', 'share'),
@@ -278,6 +295,8 @@ const RECEPTIONIST: Permission[] = [
   ...p('clinic', 'read'),
   ...p('patient', 'read', 'create', 'update'),
   ...p('appointment', 'read', 'create', 'update', 'delete'),
+  /* The desk is where somebody is carried in to. */
+  ...p('emergency', 'create'),
   // Encounter METADATA only — enough to see that Dr X saw the patient at 10:15
   // and the visit is complete, without exposing the clinical record.
   ...p('encounter', 'read'),
@@ -304,6 +323,8 @@ const NURSE_ASSISTANT: Permission[] = [
   ...p('clinic', 'read'),
   ...p('patient', 'read', 'update'),
   ...p('appointment', 'read', 'update'),
+  /* Triage is often the first person to reach them. */
+  ...p('emergency', 'create'),
   ...p('encounter', 'read'),
   ...p('encounterClinicalContent', 'read'),
   ...p('observation', 'read', 'create', 'update'),

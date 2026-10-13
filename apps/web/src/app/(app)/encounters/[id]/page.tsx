@@ -311,7 +311,7 @@ export default function ConsultationPage() {
 
   if (encounter.isLoading || !encounter.data || !patient.data) {
     return (
-      <div className="mx-auto flex max-w-6xl flex-col gap-4">
+      <div className="flex w-full flex-col gap-3">
         <Skeleton className="h-8 w-72" />
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-64 w-full" />

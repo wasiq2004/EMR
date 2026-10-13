@@ -9,8 +9,8 @@
  */
 
 import { z } from 'zod';
-import { AuditFields, IsoDate, IsoDateTime, Uuid } from './common';
-import { AppointmentStatus } from './enums';
+import { AuditFields, IsoDate, IsoDateTime, PhoneE164, Uuid } from './common';
+import { AppointmentStatus, Gender } from './enums';
 import { PatientSummary } from './patient';
 
 export const Appointment = z.object({
@@ -34,6 +34,17 @@ export const Appointment = z.object({
    */
   queuePosition: z.number().int().nullable(),
   isWalkIn: z.boolean(),
+
+  /**
+   * Carried in. Stays true after the visit, because "how many emergencies did
+   * we see last month" is a question asked of old data.
+   */
+  isEmergency: z.boolean().default(false),
+  /** Who brought them in today — not the patient's standing next-of-kin. */
+  attendantName: z.string().nullable().default(null),
+  attendantPhoneE164: z.string().nullable().default(null),
+  /** Set when the duplicate search was skipped, which is only ever on this path. */
+  registrationBypassReason: z.string().nullable().default(null),
   reasonText: z.string().nullable(),
   notes: z.string().nullable(),
   cancelledReason: z.string().nullable(),
@@ -101,6 +112,56 @@ export const AddToQueue = z.object({
   idempotencyKey: z.string().min(8).max(200).nullish(),
 });
 export type AddToQueue = z.infer<typeof AddToQueue>;
+
+/**
+ * Somebody carried in, registered and queued in one action.
+ *
+ * DELIBERATELY ALMOST EMPTY. The only required field is a label, because the
+ * patient may be unconscious, unaccompanied and carrying nothing. Everything
+ * the ordinary registration insists on — a gender, an age or a date of birth,
+ * and proof that a duplicate search ran — is optional or bypassed here.
+ *
+ * That is not a relaxation of the rules for convenience. The duplicate check
+ * exists because a busy desk creates second records for the same person, and it
+ * is the right rule at a desk. It is the wrong rule when the question is
+ * whether somebody is seen in the next two minutes, and a form that cannot be
+ * completed under those conditions is a form people work around — by inventing
+ * a date of birth, which is worse than recording that they did not know it.
+ *
+ * `label` rather than `fullName`: "Unknown male, approx 40" is a legitimate
+ * value and calling the field a name invites somebody to make one up.
+ */
+export const EmergencyIntake = z.object({
+  label: z
+    .string()
+    .trim()
+    .min(2, 'Enter a name, or a description such as "Unknown male, approx 40"')
+    .max(120),
+
+  mobileE164: PhoneE164.nullish(),
+  /** Defaults to UNKNOWN, which the enum already carries for exactly this. */
+  gender: Gender.nullish(),
+  /** An estimate is useful and a guess dressed as a date of birth is not. */
+  ageYears: z.number().int().min(0).max(130).nullish(),
+
+  /** Whoever brought them in. Different from the patient's standing next-of-kin. */
+  attendantName: z.string().trim().max(120).nullish(),
+  attendantPhoneE164: PhoneE164.nullish(),
+
+  practitionerId: Uuid.nullish(),
+  /** Free text — "RTA, head injury". Not a diagnosis and not coded. */
+  reasonText: z.string().trim().max(500).nullish(),
+
+  /**
+   * Why the duplicate search was skipped. Defaulted rather than demanded: at the
+   * moment this form is used, making somebody type a justification is the kind
+   * of friction that gets the whole feature bypassed.
+   */
+  bypassReason: z.string().trim().max(200).nullish(),
+
+  idempotencyKey: z.string().min(8).max(200).nullish(),
+});
+export type EmergencyIntake = z.infer<typeof EmergencyIntake>;
 
 export const ChangeAppointmentStatus = z.object({
   appointmentId: Uuid,
@@ -344,6 +405,7 @@ export const CalendarEntry = z.object({
   scheduledEnd: IsoDateTime,
   minutes: z.number().int(),
   isWalkIn: z.boolean(),
+  isEmergency: z.boolean().default(false),
   reasonText: z.string().nullable(),
   /** Row version, so a drag can be rescheduled without clobbering a concurrent edit. */
   version: z.number().int(),

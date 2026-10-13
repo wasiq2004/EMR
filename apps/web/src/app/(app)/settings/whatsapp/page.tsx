@@ -136,7 +136,7 @@ export default function WhatsappSettingsPage() {
   const residencyOk = data.localStorageRegion === 'India';
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
       {/*
         First, because it is the difference between messages going out and
         messages being recorded as though they did.

@@ -1,3 +1,210 @@
+# NEXT — the three changes from 2026-10-13
+
+From the manager: merge Register into Book Appointment, run billing across
+reception / doctor / lab / pharmacy, and add an emergency path.
+
+Written after reading the code rather than from the brief alone, because three
+of the asks land differently than they read.
+
+---
+
+## Decisions — answered 2026-10-13
+
+- [x] **D1 — The pharmacy keeps taking money, and ANY till can settle ANY charge.**
+      "Pay anywhere they want." This is a better model than the one in the brief
+      and it makes the billing work smaller, not larger.
+
+      The brief described charges flowing TO reception, which meant a direction,
+      a hand-off and a place where they could get stuck. The answer is simpler:
+      **one outstanding balance per visit, and every counter can collect against
+      it.** The pharmacy keeps its own sale document for the medicine — it has
+      its own GST treatment and its own stock movements and should not lose
+      them — and can additionally take payment against the consultation or the
+      lab charge. So can reception. The patient pays whoever they are standing
+      in front of.
+
+      What this removes: "post to reception" as a concept, and the risk of a
+      charge stranded between two departments.
+- [x] **D2 — The lab does not bill. Reception adds the charge on return.**
+      The patient goes to the lab, has the test, and comes back to reception for
+      the result. Reception adds the service to the visit's dues at that point.
+
+      **This deletes most of Block 3.** No lab pricing catalogue, no charge
+      posted by a lab assistant, no lab-side billing screen, and no new role —
+      which matters, because we are trying to shed roles rather than add one.
+      Lab tests become service items, which already exist and already carry a
+      price.
+- [x] **D3 — Follows from D1.** A balance that any till can settle is visible
+      wherever the patient is, so the desk can ask for it at the natural moment
+      rather than chasing it. Consultation fee still collected at check-in.
+- [x] **D4 — Emergency is the priority, and must be fast to reach.**
+      Built as a dedicated area inside the clinic panel rather than a fourth
+      panel with its own session: same single click for the receptionist,
+      without another layout and another session boundary on a product we have
+      agreed is too complex. Say the word if you want a genuinely separate
+      panel and it can be promoted.
+- [x] **D5 — Minimal identity, taken as proposed.** A label is enough: a name,
+      or "Unknown male, approx 40". Gender defaults to the UNKNOWN the enum
+      already has, age is optional, and the rest is completed afterwards.
+
+### Still open
+- [ ] Who may raise an emergency visit? Current intent: reception, nurse,
+      doctor and clinic admin — the people who are physically there when
+      somebody is carried in. Say if a pharmacist or anybody else needs it.
+- [ ] Whether an unpaid balance should block marking a visit CHECKED_OUT, or
+      only show. D1 makes this less pressing; it is now a policy preference.
+
+## Block 1 — One place to book, one place to register
+
+The best-shaped of the three. The server already works this way: registration
+REFUSES to proceed without proof that a duplicate search ran first, so the
+merged flow is not a workaround — it is the flow the API was built for, and the
+current two-door UI is what diverged from it.
+
+**It also deletes surface**, which is the direction we want: one entry point
+instead of two, and `/patients/new` stops being somewhere a receptionist can
+land cold.
+
+- [ ] 1.1 One search box on the booking screen. Type a name or number; matching
+      patients appear as you type. This already exists as an endpoint — the
+      duplicate check — and already returns the token registration needs.
+- [ ] 1.2 When nothing matches, the dropdown's last row becomes
+      **"Not found — register and book"** rather than a dead end.
+- [ ] 1.3 Choosing it expands registration inline: name, gender, age or date of
+      birth, mobile. Nothing else is required at this point. The search token
+      from 1.1 carries straight through, so the duplicate check is satisfied
+      without a second search.
+- [ ] 1.4 One submit registers the patient and books the slot. Both must land or
+      neither: a patient with no appointment is a confusing orphan at a desk,
+      and an appointment with no patient is impossible.
+- [ ] 1.5 Hold ONE idempotency key across the whole merged action. A double-tap
+      here would otherwise create a patient AND a booking twice.
+- [ ] 1.6 Keep the registry for lookup, merge, documents and editing — it is not
+      the entry point any more, but it is still where you go to find somebody.
+      Remove "new patient" as a separate nav action.
+- [ ] 1.7 The likely-duplicate warning still interrupts, and still needs a
+      written reason to dismiss. The whole point of search-first survives the
+      merge; a faster path must not become a quieter one.
+- [ ] 1.8 Verification: register-and-book in one call, a repeat of it, and a
+      duplicate override — asserted against the database, not the screen.
+
+## Block 2 — The emergency path  ·  BUILT 2026-10-13
+
+- [x] 2.1 `appointment.is_emergency` — a flag on the ordinary visit, not a new
+      record type. A separate emergency record forks every screen that lists a
+      visit, and the emergency copy of each then drifts from the one people
+      actually maintain. Migration `0018` asserts no such table exists, so the
+      decision cannot be quietly reversed.
+- [x] 2.2 `POST /emergency` and `/emergency` — ONE required field, a label.
+      Not a name: the patient may be unconscious and unaccompanied, and
+      "Unknown male, approx 40" is a better record than a guessed name. Gender
+      defaults to the UNKNOWN the enum already carries; age is an optional
+      estimate. Attendant name and number live on the VISIT, because
+      `patient.emergency_contact_*` is the standing next-of-kin and the
+      neighbour who drove them here is somebody different next time.
+- [x] 2.3 The duplicate search is bypassed and the bypass is RECORDED, on the
+      row and in the audit trail. Registering normally refuses without proof a
+      search ran; that rule is right at a desk and wrong when somebody is being
+      carried in. The duplicates this creates are a known cost, resolved by
+      merging — the right direction for the error to run in.
+- [x] 2.4 The queue sorts `isEmergency` FIRST, ahead of manual position.
+      Positions are hand-editable by design, so sorting on position alone would
+      let a desk drag somebody who was carried in below a routine follow-up
+      without meaning to. The row carries a red rail, a solid red position
+      number, an Emergency badge and the attendant's number — read from across a
+      room, which is the distance somebody is standing at when they need it.
+- [x] 2.5 A `COMPLETE_EMERGENCY_REGISTRATION` task is raised in the same
+      transaction, and the patient is tagged `incomplete-registration`. Without
+      it these quietly become the worst data in the system: no date of birth, a
+      guessed name, and nobody whose job it is to fix them. URGENT rather than
+      STAT — STAT means a clinical emergency, and spending it on paperwork about
+      one is how STAT stops meaning anything.
+- [x] 2.6 Rejoins the ordinary flow: same consultation, same prescription, same
+      bill, flagged throughout. The flag stays set afterwards, because "how many
+      emergencies last month" is asked of old data.
+- [x] 2.7 Access: a red **Emergency** button in the header on every screen,
+      shown only to the four roles holding `emergency:create` — reception,
+      nursing, doctor, clinic admin. Not in the sidebar, where it would be the
+      ninth item in a list somebody has to read; the value is that it is in the
+      same place whatever is on screen. Labelled rather than icon-only, because
+      an icon is something you learn and this has to work on somebody's second
+      day.
+- [x] 2.8 ~25 assertions in `availability.sh`: a label-only admission, the flag,
+      the recorded bypass, that it lands FIRST in the queue ahead of a walk-in
+      added after it, the completion task, idempotency on a double-tap, refusal
+      of an empty label, and that all four roles can admit while the pharmacist
+      and auditor cannot. `/emergency` added to the browser walk.
+
+### Not done yet
+- [ ] Visual check of the real screen. The page is behind the authenticated
+      shell and the API was down, so it was verified by typecheck, lint, a
+      64-page build, and by rendering its markup against the compiled stylesheet
+      — not by signing in and looking at it. Do this on the next Docker run.
+- [ ] Migration `0018` is unapplied. Its assertions have never executed.
+
+## Block 3 — Lab charges  (mostly deleted by D2)
+
+Reception adds the charge when the patient returns for the result, so there is
+no lab-side billing to build.
+
+- [ ] 3.1 Lab tests exist as service items with a price. `serviceItem` already
+      does this; it is a data task, not a schema one.
+- [ ] 3.2 Reception can add a service line to an open visit from the patient's
+      screen, which is what "add the service and list it in the dues" means.
+- [ ] 3.3 Releasing a report never depends on the bill being paid.
+- [ ] ~~A lab price catalogue~~ — not needed.
+- [ ] ~~A charge posted by the lab~~ — not needed.
+- [ ] ~~A lab assistant role~~ — not needed.
+
+## Block 4 — One balance, collectible anywhere
+
+- [ ] 4.1 A per-visit charge ledger: consultation, lab service, anything else
+      reception adds. Invoice line items are already JSONB with an optional
+      HSN/SAC code, so one document can hold a service and a good without a
+      schema change.
+- [ ] 4.2 The visit carries an outstanding balance, visible on the queue row,
+      the patient screen and at the pharmacy counter.
+- [ ] 4.3 Any till can take a payment against it — reception or pharmacy. The
+      payment records WHERE it was taken, because reconciling two cash drawers
+      at the end of the day is the first thing a clinic will ask for.
+- [ ] 4.4 The pharmacy keeps its own sale document for medicine. It is a
+      separate tax document and stays one; the counter simply gains the ability
+      to settle the rest of the visit as well.
+- [ ] 4.5 Consultation fee at check-in.
+- [ ] 4.6 **Money and clinical facts stay separate.** A dispense is a fact about
+      medicine handed over; a sale is a fact about money. An unpaid prescription
+      must never read as undispensed, and an unpaid test must never hide a
+      result. This is the one line not to cross.
+- [ ] 4.7 Verification: a charge from two sources on one balance, settled at the
+      pharmacy, leaves the right amount and names the till that took it.
+
+---
+
+## Sequencing, and why
+
+1. **Block 2 — Emergency, first.** Asked for directly, self-contained, touches
+   no billing, and it is the one with a patient being carried through a door
+   while somebody looks for the right screen.
+2. **Block 1 — Book and register in one place.** Smallest, no open decisions,
+   removes a screen rather than adding one, and fixes what receptionists are
+   complaining about today.
+3. **Block 3 — Lab tests as priced services.** Now a small data task.
+4. **Block 4 — One balance, any till.** Last, because it depends on 3 and is the
+   largest remaining piece.
+
+Blocks 3 and 4 shrank considerably under D1 and D2. What was "a new lab billing
+capability plus a combined invoice" is now "price some services, and let any
+counter settle one balance".
+
+## While we are here
+
+- [ ] `scripts/verify/pharmacy.sh` asserts a pharmacist gets 403 on
+      `GET /encounters/:id`. RBAC grants PHARMACIST `encounter:read` on purpose,
+      so that assertion is wrong and will fail on the next run. Fix the
+      assertion, not the permission.
+
+---
+
 # Build to completion — task list
 
 End-to-end: real backend, real database, Docker, everything wired.

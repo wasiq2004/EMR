@@ -110,7 +110,7 @@ export default function BroadcastsPage() {
   useServerEvents(onEvent);
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <PageHeader
         title="Broadcasts"
         description="One message to many patients — only those who agreed to receive it."

@@ -57,7 +57,7 @@ export default function LocationsSettingsPage() {
   const noPrimary = active.length > 0 && !active.some((l) => l.isPrimary);
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       {noPrimary ? (
         <Alert tone="warning" title="No primary location">
           One location should be marked primary — it is the one used where a single

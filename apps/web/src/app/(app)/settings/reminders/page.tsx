@@ -102,7 +102,7 @@ export default function RemindersSettingsPage() {
   if (settings.isLoading || !form) return <Skeleton className="h-96 w-full" />;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
       <PageHeader
         title="Follow-up reminders"
         description="When a consultation sets a follow-up, the patient can be reminded on WhatsApp before it."

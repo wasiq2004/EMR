@@ -55,7 +55,7 @@ export default function ClarificationsPage() {
   );
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <PageHeader
         title={canAnswer ? 'Questions for you' : 'Clarifications'}
         description={

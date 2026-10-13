@@ -39,7 +39,7 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
   ];
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <Link
         href="/patients"
         className="inline-flex w-fit items-center gap-1.5 text-xs text-ink-faint hover:text-ink"

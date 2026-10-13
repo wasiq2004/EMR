@@ -48,6 +48,7 @@ function entry(startLocal: string, minutes: number): CalendarEntry {
     scheduledEnd: new Date(start.getTime() + minutes * 60_000).toISOString(),
     minutes,
     isWalkIn: false,
+    isEmergency: false,
     reasonText: null,
     version: 1,
   };

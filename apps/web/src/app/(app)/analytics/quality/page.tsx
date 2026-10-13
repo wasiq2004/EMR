@@ -33,7 +33,7 @@ export default function DataQualityPage() {
   const poor = metrics.filter((m) => m.verdict === 'poor');
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <PageHeader
         title="Data quality"
         description="How complete the record is. The honest prerequisite for any cohort built on it."

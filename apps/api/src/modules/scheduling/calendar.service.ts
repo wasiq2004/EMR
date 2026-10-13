@@ -169,6 +169,7 @@ export class CalendarService {
         scheduledEnd: end.toISOString(),
         minutes,
         isWalkIn: row.appointment.isWalkIn,
+        isEmergency: row.appointment.isEmergency,
         reasonText: row.appointment.reasonText,
         version: row.appointment.version,
       };

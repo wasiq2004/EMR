@@ -463,6 +463,98 @@ req GET "/patients?q=$(printf '%s' "$PNAME" | tr ' ' '+')"
 ONCE=$(printf '%s' "$BODY" | grep -o "\"id\":\"$FIRST_PATIENT\"" | wc -l | tr -d ' ')
 check "the register holds them once" 1 "$ONCE" "$BODY"
 
+echo "-- SOMEBODY CARRIED IN --"
+#
+# The emergency path exists to be used while a patient is on a trolley, so every
+# assertion here is about it NOT getting in the way: one required field, no
+# duplicate search, and the front of the queue.
+
+login reception@$VERIFY_DOMAIN
+
+# A label is the only thing required. No gender, no age, no date of birth, and
+# no search token — all of which the ordinary registration insists on.
+EKEY=$(node -e 'console.log(require("crypto").randomUUID())')
+ELABEL="Unknown male approx 40 $RANDOM"
+req POST /emergency "{\"label\":\"$ELABEL\",\"idempotencyKey\":\"$EKEY\"}"
+check "a patient with nothing but a description is admitted" 201 "$CODE" "$BODY"
+EAPPT=$(printf '%s' "$BODY" | grep -o '"id":"[0-9a-f-]\{36\}"' | head -1 | cut -d'"' -f4)
+printf '%s' "$BODY" | grep -q '"isEmergency":true'   && check "and is flagged as an emergency" y y   || check "and is flagged as an emergency" y n "$BODY"
+printf '%s' "$BODY" | grep -q '"status":"ARRIVED"'   && check "already arrived, not merely booked" y y   || check "already arrived, not merely booked" y n "$BODY"
+
+# THE BYPASS IS RECORDED. A skipped duplicate check that leaves no trace is
+# indistinguishable from the check never having existed.
+printf '%s' "$BODY" | grep -q 'registrationBypassReason' \
+  && check "the skipped duplicate search is recorded on the visit" y y \
+  || check "the skipped duplicate search is recorded on the visit" y n "$BODY"
+
+echo "-- it goes to the front, not the back --"
+# Add an ordinary walk-in AFTER the emergency. The emergency must still be first.
+req GET '/patients?q=arjun'
+WPID=$(printf '%s' "$BODY" | grep -o '"id":"[0-9a-f-]\{36\}"' | head -1 | cut -d'"' -f4)
+req POST /queue "{\"patientId\":\"$WPID\",\"practitionerId\":\"$DOCTOR\",\"idempotencyKey\":\"$(node -e 'console.log(require("crypto").randomUUID())')\"}"
+check "an ordinary walk-in is added after it" 201 "$CODE" "$BODY"
+
+req GET /queue
+# The first appointment id in the queue payload must be the emergency.
+FIRST=$(printf '%s' "$BODY" | grep -o '"id":"[0-9a-f-]\{36\}"' | head -1 | cut -d'"' -f4)
+check "THE EMERGENCY IS FIRST IN THE QUEUE" "$EAPPT" "$FIRST" "$BODY"
+
+echo "-- the record is marked as unfinished, on purpose --"
+printf '%s' "$BODY" | grep -q 'incomplete-registration' \
+  && check "the patient is tagged as an incomplete registration" y y \
+  || check "the patient is tagged as an incomplete registration" y n "$BODY"
+
+# The task that brings the record up to a normal one. Without it, emergency
+# records quietly become the worst data in the system.
+req GET /tasks
+printf '%s' "$BODY" | grep -q "Complete registration for $ELABEL" \
+  && check "a task was raised to finish the registration" y y \
+  || check "a task was raised to finish the registration" y n "$BODY"
+printf '%s' "$BODY" | grep -q 'COMPLETE_EMERGENCY_REGISTRATION' \
+  && check "and it is findable by type" y y \
+  || check "and it is findable by type" y n "$BODY"
+
+echo "-- admitting twice --"
+# The one screen in the product most likely to be double-tapped.
+req POST /emergency "{\"label\":\"$ELABEL\",\"idempotencyKey\":\"$EKEY\"}"
+check "the same admission again is accepted" 201 "$CODE" "$BODY"
+check "and returns the original, not a second patient" "$EAPPT" "$(printf '%s' "$BODY" | grep -o '"id":"[0-9a-f-]\{36\}"' | head -1 | cut -d'"' -f4)" "$BODY"
+
+echo "-- what it refuses --"
+req POST /emergency '{"label":"x","idempotencyKey":"aaaaaaaaaaaa"}'
+check "a one-character label is refused" 422 "$CODE" "$BODY"
+req POST /emergency '{"idempotencyKey":"bbbbbbbbbbbb"}'
+check "and no label at all is refused" 422 "$CODE" "$BODY"
+
+echo "-- who may admit one --"
+# Wide on purpose: whoever is at the front of the clinic when somebody is
+# carried in. A permission so narrow its only holder is mid-consultation is a
+# permission that gets worked around.
+for who in doctor nurse owner; do
+  login $who@$VERIFY_DOMAIN
+  req POST /emergency "{\"label\":\"Admitted by $who $RANDOM\",\"idempotencyKey\":\"$(node -e 'console.log(require("crypto").randomUUID())')\"}"
+  check "$who can admit an emergency" 201 "$CODE" "$BODY"
+done
+
+# And the roles that are not standing at the front of the clinic cannot.
+login pharmacist@$VERIFY_DOMAIN
+req POST /emergency '{"label":"Should be refused","idempotencyKey":"cccccccccccc"}'
+check "the pharmacist cannot admit one" 403 "$CODE" "$BODY"
+login auditor@$VERIFY_DOMAIN
+req POST /emergency '{"label":"Should be refused","idempotencyKey":"dddddddddddd"}'
+check "nor the auditor" 403 "$CODE" "$BODY"
+
+echo "-- an emergency is an ordinary visit from here on --"
+# The whole design rests on this: same consultation, same prescription, same
+# bill. If it needed its own path, every screen would have forked.
+login doctor@$VERIFY_DOMAIN
+req POST /encounters "{\"appointmentId\":\"$EAPPT\"}"
+if [ "$CODE" = "201" ] || [ "$CODE" = "200" ]; then
+  check "a consultation opens on it like any other" y y
+else
+  check "a consultation opens on it like any other" y n "got $CODE: $BODY"
+fi
+
 echo
 echo "  $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

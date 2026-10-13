@@ -30,7 +30,7 @@ export default function ReportsPage() {
   const maxCollections = Math.max(1, ...series.map((point) => point.collectionsPaise));
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <PageHeader
         title="Reports"
         description="Last 14 days"

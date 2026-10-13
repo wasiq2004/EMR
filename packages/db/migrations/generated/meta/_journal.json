@@ -99,6 +99,13 @@
       "when": 1791190947929,
       "tag": "0013_registration_idempotency",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791909544301,
+      "tag": "0014_emergency_admission",
+      "breakpoints": true
     }
   ]
 }

@@ -43,7 +43,7 @@ export default function PharmacyQueuePage() {
   const oldest = alerts.data?.oldestWaitingMinutes ?? null;
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <PageHeader
         title="Prescription queue"
         description="Finalised prescriptions arrive here automatically. Nothing is retyped."

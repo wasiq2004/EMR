@@ -130,7 +130,7 @@ export default function NewInvoicePage() {
   };
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
       <Link
         href="/billing"
         className="inline-flex w-fit items-center gap-1.5 text-xs text-ink-faint hover:text-ink"

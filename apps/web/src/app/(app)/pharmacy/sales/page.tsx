@@ -51,7 +51,7 @@ export default function SalesPage() {
   const returned = today.filter((s) => s.isReturn).length;
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <PageHeader
         title="Counter sales"
         description="Charging for medicine, whether against a prescription or over the counter."

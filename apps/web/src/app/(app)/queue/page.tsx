@@ -3,17 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import {
-  AlertTriangle,
-  ArrowDown,
-  ArrowUp,
-  Check,
-  LogOut,
-  Stethoscope,
-  UserPlus,
-  UserX,
-  Users,
-} from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, Check, LogOut, Siren, Stethoscope, UserPlus, Users, UserX } from 'lucide-react';
 import type { QueueEntry } from '@emr/contracts';
 import {
   useChangeAppointmentStatus,
@@ -25,6 +15,7 @@ import { AddWalkInDialog } from '@/features/queue/add-walk-in-dialog';
 import { CheckOutDialog } from '@/features/queue/check-out-dialog';
 import { useCan } from '@/lib/session';
 import { ageGender, formatMinutes, formatTime } from '@/lib/format';
+import { cn } from '@/lib/cn';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Panel, PanelHeader, PageHeader } from '@/components/ui/surface';
@@ -92,7 +83,7 @@ export default function QueuePage() {
   };
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <PageHeader
         title="Today's queue"
         description={
@@ -127,18 +118,37 @@ export default function QueuePage() {
           <ul className="divide-y divide-line-soft">
             {waiting.map((entry, index) => {
               const inConsultation = entry.appointment.status === 'IN_PROGRESS';
+              const emergency = entry.appointment.isEmergency;
 
               return (
                 <li
                   key={entry.appointment.id}
-                  className={
-                    inConsultation
-                      ? 'flex flex-wrap items-center gap-3 bg-accent-soft/40 px-3 py-3'
-                      : 'flex flex-wrap items-center gap-3 px-3 py-3'
-                  }
+                  /*
+                   * AN EMERGENCY ROW IS LOUD, and it stays loud while the patient
+                   * is in with the doctor. A tinted row plus a solid left rail
+                   * reads from across a room, which is the distance a receptionist
+                   * is standing at when they need to know who is next.
+                   *
+                   * The rail is a border rather than a badge alone, because a
+                   * badge is one more thing to scan on a row that already carries
+                   * allergy, walk-in and consultation chips. Colour at the edge is
+                   * read before any of them.
+                   */
+                  className={cn(
+                    'relative flex flex-wrap items-center gap-3 px-3 py-3',
+                    emergency && 'border-l-4 border-critical bg-critical-soft/50 pl-2',
+                    !emergency && inConsultation && 'bg-accent-soft/40',
+                  )}
                 >
                   {/* Position — the number the patient is told. */}
-                  <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-surface-sunk text-sm font-bold tabular text-ink">
+                  <span
+                    className={cn(
+                      'flex size-8 shrink-0 items-center justify-center rounded-md text-sm font-bold tabular',
+                      emergency
+                        ? 'bg-critical text-critical-contrast'
+                        : 'bg-surface-sunk text-ink',
+                    )}
+                  >
                     {index + 1}
                   </span>
 
@@ -178,6 +188,17 @@ export default function QueuePage() {
                       <span className="text-sm text-ink-soft">
                         {ageGender(entry.patient)}
                       </span>
+                      {/*
+                        First, before the allergy chip. Both matter, and this is
+                        the one that decides whether the next thirty seconds are
+                        normal.
+                      */}
+                      {emergency ? (
+                        <Badge tone="alarm">
+                          <Siren aria-hidden />
+                          Emergency
+                        </Badge>
+                      ) : null}
                       {entry.patient.hasHighCriticalityAllergy ? (
                         <Badge tone="critical">
                           <AlertTriangle aria-hidden />
@@ -195,6 +216,20 @@ export default function QueuePage() {
                       {entry.appointment.reasonText ?? 'No reason given'}
                       {entry.practitionerName ? ` · ${entry.practitionerName}` : ''}
                     </span>
+                    {/*
+                      Who brought them in, on the row rather than a click away.
+                      For somebody who cannot answer questions, the person
+                      standing next to them is the only history available, and
+                      the number is who gets rung when a decision is needed.
+                    */}
+                    {emergency && entry.appointment.attendantName ? (
+                      <span className="mt-0.5 block truncate text-2xs font-medium text-critical">
+                        With {entry.appointment.attendantName}
+                        {entry.appointment.attendantPhoneE164
+                          ? ` · ${entry.appointment.attendantPhoneE164}`
+                          : ''}
+                      </span>
+                    ) : null}
                   </span>
 
                   <span className="shrink-0 text-right">

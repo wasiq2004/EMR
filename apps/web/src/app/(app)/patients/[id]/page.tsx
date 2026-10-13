@@ -70,7 +70,7 @@ export default function PatientSnapshotPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       {/* Allergies first. Always. */}
       {isLoading || !data ? (
         <Skeleton className="h-20 w-full" />

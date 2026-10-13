@@ -45,7 +45,7 @@ export default function MergePatientsPage() {
   );
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <PageHeader
         title="Duplicate patients"
         description="Candidates found by the nightly check. Each one needs a person to decide."

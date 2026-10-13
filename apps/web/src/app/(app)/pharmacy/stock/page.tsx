@@ -52,7 +52,7 @@ export default function StockPage() {
   const batches = useStockBatches({ search: search || undefined, includeEmpty });
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <PageHeader
         title="Inventory"
         description="Nearest expiry first — the order stock should leave the shelf in."

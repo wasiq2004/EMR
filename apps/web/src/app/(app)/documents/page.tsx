@@ -27,7 +27,7 @@ export default function DocumentsPage() {
   const documents = data?.items ?? [];
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <PageHeader title="Documents" description="Prescriptions, reports and uploads." />
 
       <Input

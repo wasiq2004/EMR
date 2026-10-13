@@ -37,7 +37,7 @@ export default function DictionaryPage() {
   }, [dictionary.data, search]);
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <PageHeader
         title="Data dictionary"
         description="What each field means, where it comes from, and what its absence means."

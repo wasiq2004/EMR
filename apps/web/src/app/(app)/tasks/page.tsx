@@ -46,7 +46,7 @@ export default function TasksPage() {
   const tasks = data?.items ?? [];
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <PageHeader
         title="Tasks"
         description="Things that need a person, not a notification."

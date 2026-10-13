@@ -36,7 +36,7 @@ export default function AnalyticsOverviewPage() {
   const signed = metrics.find((m) => m.key === 'encounters-finalised');
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <PageHeader
         title="Analytics"
         description="Governed, de-identified analysis of this clinic's own records."
