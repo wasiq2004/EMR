@@ -49,13 +49,17 @@ export interface PanelDefinition {
   /** One sentence on what the panel is for. Read by the landing header. */
   purpose: string;
   /**
-   * The single thing this panel exists to do, rendered in a fixed position so
-   * it is in the same place every time.
+   * The action that STARTS new work in this panel, rendered in a fixed position
+   * so it is in the same corner on every panel that has one.
    *
-   * `null` is a legitimate answer and is used twice. Clinic Admin and
-   * Compliance have no once-an-hour action — administering is reviewing, and
-   * inventing a call to action for it would put a button on screen that nobody
-   * presses and everybody has to read past.
+   * `null` is the right answer more often than it looks, and the rule is: if
+   * the landing already leads with the work, do not put a button above it that
+   * goes to the same place. The doctor's home opens on the next patient with an
+   * open-consultation control already on the row; nursing opens on the vitals
+   * list. A header button there would be a second way to do what the screen is
+   * already shouting, which is the equal-weight clutter this whole exercise is
+   * trying to remove. Clinic Admin and Compliance have no creation action at
+   * all — administering is reviewing.
    */
   primary: { label: string; href: Route; permission: Permission } | null;
 }
@@ -79,11 +83,8 @@ export const PANELS: Record<PanelId, PanelDefinition> = {
     mark: Stethoscope,
     landing: '/today',
     purpose: 'Your list for today, and the consultations still unsigned.',
-    primary: {
-      label: 'See next patient',
-      href: '/queue',
-      permission: 'encounter:create',
-    },
+    // The home opens on the next patient with the control already on the row.
+    primary: null,
   },
   nursing: {
     id: 'nursing',
@@ -91,11 +92,8 @@ export const PANELS: Record<PanelId, PanelDefinition> = {
     mark: HeartPulse,
     landing: '/today',
     purpose: 'Vitals to record before the doctor calls each patient.',
-    primary: {
-      label: 'Record vitals',
-      href: '/queue',
-      permission: 'observation:create',
-    },
+    // Same reason as the doctor: the list IS the call to action.
+    primary: null,
   },
   'clinic-admin': {
     id: 'clinic-admin',
@@ -112,9 +110,9 @@ export const PANELS: Record<PanelId, PanelDefinition> = {
     landing: '/pharmacy',
     purpose: 'Prescriptions waiting to be dispensed, and what is in stock.',
     primary: {
-      label: 'Dispense next',
-      href: '/pharmacy',
-      permission: 'dispense:create',
+      label: 'Counter sale',
+      href: '/pharmacy/sales',
+      permission: 'pharmacySale:create',
     },
   },
   analytics: {

@@ -9,7 +9,8 @@ import { formatMinutes, formatTime } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { DataState, StatRow } from '@/components/ui/data-state';
-import { PageHeader, Panel, PanelBody, PanelHeader, Stat } from '@/components/ui/surface';
+import { Panel, PanelBody, PanelHeader, Stat } from '@/components/ui/surface';
+import { PanelPageHeader, summarise } from '@/components/layout/panel-header';
 import { cn } from '@/lib/cn';
 
 /**
@@ -44,9 +45,17 @@ export default function PharmacyQueuePage() {
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
-      <PageHeader
-        title="Prescription queue"
-        description="Finalised prescriptions arrive here automatically. Nothing is retyped."
+      {/*
+        Titled for the PANEL, not the screen. "Prescription queue" named what
+        this page lists; it did not tell a pharmacist which of seven workspaces
+        they were in, which was the complaint. What the page lists is said in
+        the line underneath, where it belongs.
+      */}
+      <PanelPageHeader
+        summary={summarise(
+          'Finalised prescriptions arrive here automatically',
+          'nothing is retyped',
+        )}
         actions={
           <Button variant="secondary" asChild>
             <Link href="/pharmacy/alerts">

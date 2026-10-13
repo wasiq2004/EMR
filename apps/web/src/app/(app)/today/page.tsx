@@ -16,7 +16,7 @@ import {
   Users,
 } from 'lucide-react';
 import type { Route } from 'next';
-import type { ReportSummary, Task } from '@emr/contracts';
+import type { ReportSummary, Task, UserRole } from '@emr/contracts';
 import { api } from '@/lib/api-client';
 import { qk } from '@/lib/query-client';
 import { useSession } from '@/lib/session';
@@ -24,7 +24,8 @@ import { ageGender, formatMinutes, formatPaiseShort } from '@/lib/format';
 import { useQueue, useStartConsultation } from '@/features/queue/api';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Panel, PanelBody, PanelHeader, PageHeader, Stat } from '@/components/ui/surface';
+import { Panel, PanelBody, PanelHeader, Stat } from '@/components/ui/surface';
+import { PanelPageHeader, summarise } from '@/components/layout/panel-header';
 import { ResultsToReviewCard } from '@/features/lab/results-to-review-card';
 import { EmptyState, SkeletonRows } from '@/components/ui/feedback';
 
@@ -39,30 +40,35 @@ import { EmptyState, SkeletonRows } from '@/components/ui/feedback';
 export default function TodayPage() {
   const session = useSession();
 
+  /*
+    Each role home renders its OWN header, because the summary line has to be
+    built from the data that home already loaded. A header up here would either
+    duplicate those queries or print a number nobody can vouch for.
+  */
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
-      <PageHeader
-        title={greeting(session.fullName)}
-        description={new Date().toLocaleDateString('en-IN', {
-          weekday: 'long',
-          day: 'numeric',
-          month: 'long',
-        })}
-      />
-
       {session.role === 'RECEPTIONIST' ? <FrontDeskHome /> : null}
       {session.role === 'DOCTOR' ? <DoctorHome /> : null}
       {session.role === 'NURSE_ASSISTANT' ? <NurseHome /> : null}
       {session.role === 'OWNER_ADMIN' ? <ClinicAdminHome /> : null}
+      {OTHER_PANEL_ROLES.includes(session.role) ? <PanelPageHeader /> : null}
     </div>
   );
 }
 
-function greeting(fullName: string): string {
-  const hour = new Date().getHours();
-  const part = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-  const first = fullName.split(' ').slice(0, 2).join(' ');
-  return `${part}, ${first}`;
+/**
+ * Roles whose landing is elsewhere but who can still reach /today. They get the
+ * panel header alone rather than a blank screen.
+ */
+const OTHER_PANEL_ROLES: UserRole[] = ['PHARMACIST', 'RESEARCH_ANALYST', 'AUDITOR'];
+
+/** Today, written the way a person says it. */
+function today(): string {
+  return new Date().toLocaleDateString('en-IN', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
 }
 
 /* ------------------------------------------------------------------------- *
@@ -74,9 +80,23 @@ function FrontDeskHome() {
   const tasks = useOpenTasks();
   const waiting = queue.data?.waiting ?? [];
   const longestWait = waiting.reduce((max, e) => Math.max(max, e.waitingMinutes ?? 0), 0);
+  const arrived = waiting.filter((e) => e.appointment.status === 'ARRIVED').length;
+  const openTasks = tasks.data?.items.length ?? 0;
 
   return (
     <>
+      <PanelPageHeader
+        summary={summarise(
+          today(),
+          // Only once the queue has actually answered. A "0 waiting" printed
+          // during the first load is the most believable wrong thing this
+          // screen could say.
+          queue.isLoading ? null : `${arrived} waiting`,
+          !queue.isLoading && longestWait > 0 ? `longest ${formatMinutes(longestWait)}` : null,
+          !tasks.isLoading && openTasks > 0 ? `${openTasks} open tasks` : null,
+        )}
+      />
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Panel>
           <PanelBody>
@@ -208,6 +228,12 @@ function DoctorHome() {
   const next = mine[0];
   const drafts = mine.filter((entry) => entry.encounterId !== null);
 
+  const summary = summarise(
+    today(),
+    queue.isLoading ? null : `${mine.length} waiting for you`,
+    !queue.isLoading && drafts.length > 0 ? `${drafts.length} unsigned` : null,
+  );
+
   const open = async (patientId: string, appointmentId: string) => {
     const encounter = await start.mutateAsync({ patientId, appointmentId });
     router.push(`/encounters/${encounter.id}`);
@@ -215,6 +241,8 @@ function DoctorHome() {
 
   return (
     <>
+      <PanelPageHeader summary={summary} />
+
       {/*
         Above the next patient, deliberately.
         
@@ -368,6 +396,13 @@ function NurseHome() {
 
   return (
     <div className="flex flex-col gap-4">
+      <PanelPageHeader
+        summary={summarise(
+          today(),
+          queue.isLoading ? null : `${waiting.length} waiting for vitals`,
+        )}
+      />
+
       {/* The nurse is often the one who types a report in when it arrives. */}
       <ResultsToReviewCard />
 
@@ -428,6 +463,13 @@ function ClinicAdminHome() {
 
   return (
     <>
+      <PanelPageHeader
+        summary={summarise(
+          today(),
+          isLoading ? null : `${data?.visits ?? 0} visits in 14 days`,
+        )}
+      />
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Panel>
           <PanelBody>

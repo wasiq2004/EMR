@@ -2,14 +2,15 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { FlaskConical, LineChart, Microscope, ShieldCheck } from 'lucide-react';
+import { FlaskConical, LineChart, ShieldCheck } from 'lucide-react';
 import { useCohorts, useDataQuality } from '@/features/research/api';
 import { formatDateTime, relativeTime } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { DataState, StatRow } from '@/components/ui/data-state';
 import { Alert, SkeletonRows } from '@/components/ui/feedback';
-import { PageHeader, Panel, PanelBody, PanelHeader, Stat } from '@/components/ui/surface';
+import { Panel, PanelBody, PanelHeader, Stat } from '@/components/ui/surface';
+import { PanelPageHeader } from '@/components/layout/panel-header';
 
 /**
  * The analytics overview.
@@ -37,17 +38,14 @@ export default function AnalyticsOverviewPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
-      <PageHeader
-        title="Analytics"
-        description="Governed, de-identified analysis of this clinic's own records."
-        actions={
-          <Button variant="primary" asChild>
-            <Link href="/analytics/cohorts">
-              <Microscope aria-hidden />
-              Build a cohort
-            </Link>
-          </Button>
-        }
+      {/*
+        The panel's own primary action now comes from the registry, so it reads
+        "New cohort" in the same corner as every other panel's. The bespoke
+        button here said the same thing in different words, which is how two
+        screens start drifting.
+      */}
+      <PanelPageHeader
+        summary="Governed, de-identified analysis of this clinic's own records."
       />
 
       <Alert tone="info" title="You are looking at counts, not people">
