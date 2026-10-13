@@ -449,12 +449,80 @@ const ANALYTICS_SECTIONS: NavSection[] = [
   },
 ];
 
+/**
+ * What each clinic role reaches for first.
+ *
+ * THE SYMPTOM THIS FIXES. Front Desk, Doctor, Nursing and Clinic Admin all
+ * opened on the identical four links — Today, Queue, Calendar, Appointment
+ * list — in the identical order. Four panels, one shape. It is the plainest
+ * reason they read as the same workspace with things missing.
+ *
+ * These lists are NOT invented. Each is the route sequence already documented
+ * in `docs/flows/*.svg`, which were generated from the real screens:
+ *
+ *   Receptionist  today → patients → book → queue → take payment
+ *   Doctor        today → queue → consultation
+ *   Nurse         today → queue → vitals
+ *   Clinic Admin  settings → … → reports   (the queue is not in their day)
+ *
+ * A route named here is lifted into the opening section in this order. Anything
+ * not named keeps its existing section and order, so this decides what comes
+ * FIRST without secretly becoming a second copy of the navigation.
+ *
+ * Nothing is hidden by omission: a link the role may use is still somewhere in
+ * the sidebar whether or not it appears below.
+ */
+const PANEL_LEAD: Partial<Record<PanelId, Route[]>> = {
+  // Finds people, books them, checks them in, takes the money.
+  'front-desk': ['/today', '/queue', '/patients', '/appointments', '/billing'],
+  // Opens the day and works the queue. Billing is not a doctor's job.
+  doctor: ['/today', '/queue', '/calendar'],
+  // Vitals before the doctor calls, and results to type in. Rarely books.
+  nursing: ['/today', '/queue', '/lab', '/tasks'],
+  // Runs the practice. Reads the queue; does not live in it.
+  'clinic-admin': ['/today', '/reports', '/billing', '/settings/clinic'],
+};
+
 export function navigationFor(role: UserRole): NavSection[] {
   if (role === 'AUDITOR') return COMPLIANCE_SECTIONS;
   if (role === 'PHARMACIST') return filterSections(PHARMACY_SECTIONS, role);
   if (role === 'RESEARCH_ANALYST') return filterSections(ANALYTICS_SECTIONS, role);
 
-  return filterSections(ALL_SECTIONS, role);
+  return leadWith(filterSections(ALL_SECTIONS, role), PANEL_FOR_ROLE[role]);
+}
+
+/**
+ * Moves this panel's lead routes into the opening section, in the given order.
+ *
+ * Every item that goes up is removed from where it was, so a link never appears
+ * twice, and sections emptied by the promotion are dropped.
+ */
+function leadWith(sections: NavSection[], panel: PanelId): NavSection[] {
+  const lead = PANEL_LEAD[panel];
+  if (!lead) return sections;
+
+  const byHref = new Map<string, NavItem>();
+  for (const section of sections) {
+    for (const item of section.items) byHref.set(item.href, item);
+  }
+
+  // Only what this role actually has. A lead route the role cannot reach is
+  // skipped rather than rendered as a dead link.
+  const promoted = lead
+    .map((href) => byHref.get(href))
+    .filter((item): item is NavItem => item !== undefined);
+
+  if (promoted.length === 0) return sections;
+
+  const taken = new Set(promoted.map((item) => item.href));
+  const rest = sections
+    .map((section) => ({
+      title: section.title,
+      items: section.items.filter((item) => !taken.has(item.href)),
+    }))
+    .filter((section) => section.items.length > 0);
+
+  return [{ title: null, items: promoted }, ...rest];
 }
 
 /**

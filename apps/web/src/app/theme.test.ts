@@ -90,6 +90,72 @@ describe.each(THEMES)('contrast in %s', (_label, palette) => {
   });
 });
 
+/**
+ * The seven panel tints.
+ *
+ * Added because the panel identity work introduced twenty-one colour triples
+ * across three themes, and the explicit PAIRS list above could not see any of
+ * them: they live on `[data-panel]` selectors, not in the theme blocks. An
+ * unreadable active-nav item is precisely the bug the comment at the top of
+ * this file describes, and it had just been given seven new chances to happen.
+ */
+const PANELS = [
+  'front-desk',
+  'doctor',
+  'nursing',
+  'clinic-admin',
+  'pharmacy',
+  'analytics',
+  'compliance',
+];
+
+/**
+ * The `[data-panel]` block for one panel in one theme, as its own palette.
+ *
+ * Located by literal text rather than a built regex: the selectors contain
+ * brackets, quotes and parentheses, and escaping them into a pattern is how
+ * this helper broke the first time. The light block is written before the dark
+ * ones in the file, so an empty prefix finds it first.
+ */
+function panelTokens(panel: string, prefix: string): Record<string, string> {
+  const needle = `${prefix}[data-panel='${panel}'] {`;
+  const at = css.indexOf(needle);
+  expect(at, `globals.css has no ${needle}`).toBeGreaterThan(-1);
+  return tokensIn(css.slice(at + needle.length, css.indexOf('}', at)));
+}
+
+const PANEL_THEMES: [string, string, Record<string, string>][] = [
+  ['light', '', base],
+  ['dark, toggled', ":root[data-theme='dark'] ", toggled],
+  ['dark, from the operating system', ":root:not([data-theme='light']) ", system],
+];
+
+describe.each(PANEL_THEMES)('panel tints in %s', (_label, prefix, palette) => {
+  it.each(PANELS)('%s stays readable', (panel) => {
+    const tint = panelTokens(panel, prefix);
+
+    // The active navigation item: panel-coloured text on the panel's own soft
+    // background. This is the pairing that has gone wrong here before.
+    expect(
+      contrast(tint['panel-ink']!, tint['panel-soft']!),
+      `${panel}: active nav text on its own background`,
+    ).toBeGreaterThanOrEqual(4.5);
+
+    // The indicator bar and the rule above the page title are non-text, so the
+    // boundary rule applies rather than the text one.
+    expect(
+      contrast(tint['panel']!, palette['surface']!),
+      `${panel}: the active indicator against the sidebar`,
+    ).toBeGreaterThanOrEqual(3.0);
+
+    // The mark inside the sidebar chip, which is an icon on the solid fill.
+    expect(
+      contrast(palette['panel-contrast']!, tint['panel']!),
+      `${panel}: the chip mark on its own fill`,
+    ).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
 describe('theme completeness', () => {
   it('redefines every colour the dark theme touches in both dark blocks', () => {
     // An explicit toggle and the system preference must agree. If one block

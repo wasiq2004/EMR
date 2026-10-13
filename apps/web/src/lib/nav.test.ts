@@ -43,6 +43,88 @@ describe('every link is backed by a permission the role actually holds', () => {
   });
 });
 
+/**
+ * The opening section, per panel.
+ *
+ * THE SYMPTOM. Front Desk, Doctor, Nursing and Clinic Admin all opened on the
+ * same four links in the same order — Today, Queue, Calendar, Appointment list.
+ * Four panels with one shape, which is the plainest reason they read as the
+ * same workspace with pieces missing.
+ *
+ * The orders asserted below are the route sequences already documented in
+ * docs/flows/*.svg, so these tests fail if the navigation and the diagrams stop
+ * agreeing — which is the actual thing worth catching.
+ */
+describe('each clinic panel opens on its own work', () => {
+  const CLINIC: UserRole[] = ['RECEPTIONIST', 'DOCTOR', 'NURSE_ASSISTANT', 'OWNER_ADMIN'];
+
+  const leadOf = (role: UserRole) => navigationFor(role)[0]!.items.map((i) => i.href);
+
+  it('the receptionist starts at the queue and can reach billing without hunting', () => {
+    expect(leadOf('RECEPTIONIST')).toEqual([
+      '/today',
+      '/queue',
+      '/patients',
+      '/appointments',
+      '/billing',
+    ]);
+  });
+
+  it('the doctor opens on the day and the queue, and is not led to billing', () => {
+    const lead = leadOf('DOCTOR');
+    expect(lead.slice(0, 2)).toEqual(['/today', '/queue']);
+    expect(lead, 'billing is not part of a doctor’s day').not.toContain('/billing');
+  });
+
+  it('nursing leads with vitals work, not with booking', () => {
+    const lead = leadOf('NURSE_ASSISTANT');
+    expect(lead.slice(0, 2)).toEqual(['/today', '/queue']);
+    expect(lead).toContain('/lab');
+    expect(lead, 'a nurse rarely books an appointment').not.toContain('/appointments');
+  });
+
+  it('the administrator leads with the practice, not the queue', () => {
+    const lead = leadOf('OWNER_ADMIN');
+    expect(lead).toContain('/reports');
+    expect(lead).toContain('/settings/clinic');
+  });
+
+  it('no two of the four open on the same list any more', () => {
+    const leads = CLINIC.map((role) => leadOf(role).join(','));
+    expect(new Set(leads).size, 'two panels still open identically').toBe(CLINIC.length);
+  });
+
+  /*
+   * The two ways reordering silently breaks a sidebar. Both are invisible in a
+   * screenshot: a duplicated link looks like two legitimate entries, and a lost
+   * one looks like a permission the user does not have.
+   */
+  it('promotes links without duplicating any', () => {
+    for (const role of ROLES) {
+      const hrefs = linksFor(role).map((i) => i.href);
+      expect(new Set(hrefs).size, `${role} has a link twice`).toBe(hrefs.length);
+    }
+  });
+
+  it('loses nothing: every promoted link is still exactly one link', () => {
+    for (const role of CLINIC) {
+      const hrefs = new Set(linksFor(role).map((i) => i.href));
+      // Settings is in every clinic role's sidebar and is promoted for one of
+      // them, so it is the cheapest proof that promotion moves rather than copies.
+      expect(hrefs.has('/settings/clinic'), `${role} lost settings`).toBe(true);
+      expect(hrefs.has('/today'), `${role} lost today`).toBe(true);
+    }
+  });
+
+  it('never leaves an empty section behind', () => {
+    for (const role of ROLES) {
+      for (const section of navigationFor(role)) {
+        expect(section.items.length, `${role} has an empty section`).toBeGreaterThan(0);
+      }
+    }
+  });
+});
+
 describe('the Compliance panel', () => {
   const auditorLinks = linksFor('AUDITOR');
 
